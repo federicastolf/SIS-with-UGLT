@@ -74,6 +74,27 @@ arma::mat runif_vec(const int& len, const double& minVal, const double& maxVal) 
 
 /* -------------------------------------------------------------------------- */
 
+arma::mat mvrnormArma(int n, const arma::vec& mu, const arma::mat& Sigma) {
+  int d = mu.n_elem;
+  arma::mat L = arma::chol(Sigma, "lower");
+  arma::mat Z = arma::randn(n, d);
+  arma::mat X = arma::repmat(mu.t(), n, 1) + Z * L.t();
+  return X;
+}
+
+/* -------------------------------------------------------------------------- */
+
+double dmvnorm_log(const arma::vec& x, const arma::vec& mu, const arma::mat& Sigma) {
+  int k = mu.n_elem;
+  arma::vec diff = x - mu;
+  double log_det_val;
+  double sign;
+  arma::log_det(log_det_val, sign, Sigma);
+  double quad_form = arma::as_scalar(diff.t() * arma::inv(Sigma) * diff);
+  double log_dens = -0.5 * (k * std::log(2.0 * M_PI) + log_det_val + quad_form);
+  return log_dens;
+}
+
 /* -------------------------------------------------------------------------- */
 // Functions in this file:
 //  - truncnorm_lg
@@ -124,34 +145,6 @@ arma::mat update_eta(const arma::mat& Lambda, const arma::vec& ps, const arma::m
   return eta;
 }
 
-/* -------------------------------------------------------------------------- */
-
-// Update the hth column of GammaB in the Adaptive Gibbs Sampler
-//
-// @param h An integer number.
-// @param wB A pxqB matrix.
-// @param Dt A pxk matrix.
-// @param Bh_1 A qBxqB matrix.
-// @param Phi_L A pxk matrix.
-//
-// @return A qBx1 matrix.
-//
-// @note This function uses \code{Rcpp} for computational efficiency.
-arma::mat update_gamma(const int& h, const arma::mat& wB, const arma::mat& Dt,
-                        const arma::mat& Bh_1, const arma::mat& Phi_L) {
-  int qB = wB.n_cols;
-  arma::mat Qbeta = trans(wB.each_col() % Dt.col(h)) * wB + Bh_1;
-  arma::mat Lbeta = trans(arma::chol(Qbeta));
-  arma::vec bbeta = trans(wB) * (Phi_L.col(h) - 0.5);
-  // mean
-  arma::mat vbeta = solve(trimatl(Lbeta), bbeta);
-  arma::mat mbeta = solve(trimatu(trans(Lbeta)), vbeta);
-  // var
-  arma::vec zbeta = rnorm_vec(qB, 0, 1);
-  arma::mat ybeta = solve(trimatu(trans(Lbeta)), zbeta);
-  arma::mat GammaBh = ybeta + mbeta;
-  return GammaBh;
-}
 
 /* -------------------------------------------------------------------------- */
 
@@ -319,7 +312,136 @@ arma::mat update_Phi(arma::mat& Phi, const arma::vec& rho, const arma::mat& logi
   return Phi;
 }
 
+
 /* -------------------------------------------------------------------------- */
+// compute expected values of Pólya-Gamma
+// Formula: E[PG(1, c)] = tanh(|c|/2) / (2|c|)
+// For c → 0, use the analytical limit: 0.25
+arma::vec expected_polya_gamma(const arma::vec& pred) {
+  int n = pred.n_elem;
+  arma::vec exp_d(n);
+  
+  for (int i = 0; i < n; i++) {
+    double abs_pred = std::abs(pred(i));
+
+    if (abs_pred < 1e-8) {
+      exp_d(i) = 0.25;  // lim_{c→0} tanh(c/2)/(2c) = 1/4
+    } else {
+      exp_d(i) = std::tanh(abs_pred / 2.0) / (2.0 * abs_pred);
+    }
+  }
+  
+  return exp_d;
+}
+
+
+/* -------------------------------------------------------------------------- */
+// Metropolis-Hastings sampler for gamma_h (single column of Gamma matrix)
+// Arguments:
+//   h: column index to update
+//   Gamma: current Gamma matrix (will be modified in place)
+//   Phi_L: current Phi_L matrix
+//   Dt: matrix of Pólya-Gamma variables
+//   Delta: indicator matrix for L(l_{r,-h})
+//   wB: design matrix for meta-covariates
+//   Bh_1: prior precision matrix
+//   p_constant: probability constant for the model
+//   scale_factor_MH: tuning parameter for proposal covariance
+//   p: number of rows
+//
+// Returns: true if proposal was accepted, false otherwise
+// ============================================================================
+bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L, const arma::mat& Dt,
+                     const arma::mat& Delta, const arma::mat& wB, const arma::mat& Bh_1,
+                     double p_constant, double scale_factor_MH, int p) {
+  
+  int k = Gamma.n_cols;
+  
+  // Current value
+  arma::vec gamma_h_current = Gamma.col(h);
+  
+  // Proposal using PG augmentation
+  arma::vec kappa_h = Phi_L.col(h) - 0.5;
+  arma::mat Dh = arma::diagmat(Dt.col(h));
+  // should we consider bh_1 or diagonal?
+  arma::mat V_prop_base = arma::inv(wB.t() * Dh * wB + Bh_1);
+  arma::mat V_prop = scale_factor_MH * V_prop_base;   // to control acceptance rate
+  arma::vec m_prop = V_prop_base * (wB.t() * kappa_h);
+  arma::vec gamma_h_prop = mvrnormArma(1, m_prop, V_prop).t();
+  
+  // Log-likelihood ratio
+  arma::vec pred_current = wB * gamma_h_current;
+  arma::vec pred_prop = wB * gamma_h_prop;
+  arma::vec logit_current = arma::exp(pred_current) / (1 + arma::exp(pred_current));
+  arma::vec logit_prop = arma::exp(pred_prop) / (1 + arma::exp(pred_prop));
+  double log_lik_current = 0.0;
+  double log_lik_prop = 0.0;
+  
+  // maybe we can do something more efficient here
+  for (int i = 0; i < p; i++) {
+    // Check if position i is in L(l_{r,-h})
+    bool in_L = false;
+    for (int hh = 0; hh < k; hh++) {
+      if (hh != h && Delta(i, hh) == 1) {
+        in_L = true;
+        break;
+      }
+    }
+    
+    double prob_current, prob_prop;
+    if (in_L) {
+      prob_current = p_constant * logit_current(i);
+      prob_prop = p_constant * logit_prop(i);
+    } else {
+      prob_current = std::min(p_constant * logit_current(i), 1.0);
+      prob_prop = std::min(p_constant * logit_prop(i), 1.0);
+    }
+    
+    // Bernoulli log-likelihood
+    if (Phi_L(i, h) == 1) {
+      log_lik_current += std::log(prob_current);
+      log_lik_prop += std::log(prob_prop);
+    } else {
+      log_lik_current += std::log(1 - prob_current);
+      log_lik_prop += std::log(1 - prob_prop);
+    }
+  }
+  
+  // Log-prior ratio (Gaussian prior)
+  double log_prior_current = -0.5 * arma::as_scalar(gamma_h_current.t() * Bh_1 * gamma_h_current);
+  double log_prior_prop = -0.5 * arma::as_scalar(gamma_h_prop.t() * Bh_1 * gamma_h_prop);
+  
+  // Log-transition ratio (approximate using expected PG values)
+  arma::vec exp_d_current = expected_polya_gamma(pred_current);
+  arma::vec exp_d_prop = expected_polya_gamma(pred_prop);
+  
+  arma::mat D_exp_current = arma::diagmat(exp_d_current);
+  arma::mat D_exp_prop = arma::diagmat(exp_d_prop);
+  
+  arma::mat V_trans_to_prop_base = arma::inv(wB.t() * D_exp_current * wB + Bh_1);
+  arma::mat V_trans_to_prop = scale_factor_MH * V_trans_to_prop_base;
+  arma::vec m_trans_to_prop = V_trans_to_prop_base * (wB.t() * kappa_h);
+  
+  arma::mat V_trans_to_current_base = arma::inv(wB.t() * D_exp_prop * wB + Bh_1);
+  arma::mat V_trans_to_current = scale_factor_MH * V_trans_to_current_base;
+  arma::vec m_trans_to_current = V_trans_to_current_base * (wB.t() * kappa_h);
+  
+  // Log transition densities
+  double log_trans_to_prop = dmvnorm_log(gamma_h_prop, m_trans_to_prop, V_trans_to_prop);
+  double log_trans_to_current = dmvnorm_log(gamma_h_current, m_trans_to_current, V_trans_to_current);
+  
+  // Log acceptance ratio
+  double log_alpha = (log_lik_prop - log_lik_current) + 
+                     (log_prior_prop - log_prior_current) +
+                     (log_trans_to_current - log_trans_to_prop);
+  double alpha = std::min(1.0, std::exp(log_alpha));
+  if (R::runif(0, 1) < alpha) {
+    Gamma.col(h) = gamma_h_prop;
+    return true;  // Proposal accepted
+  }
+  return false;  // Proposal rejected
+}
+
 
 
 
@@ -337,7 +459,7 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
   arma::vec v,   arma::vec w,
   Rcpp::List out, bool verbose,
   arma::vec uu, arma::vec prob, int sp,
-  arma::vec lpiv, arma::mat Delta) {
+  arma::vec lpiv, arma::mat Delta, double scale_factor_MH) {
   // ---------------------------------------------------------------------------
   // output
   Rcpp::List GAMMA(sp);
@@ -345,6 +467,7 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
   Rcpp::List LAMBDA(sp);
   Rcpp::List SIG(sp);
   arma::vec K(sp);
+  arma::vec ACC_RATE(sp);
   // ---------------------------------------------------------------------------
   // matrix dimensions
   int k = Lambda_star.n_cols;
@@ -367,29 +490,84 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
     for (j = 0; j < p; j++) {
       ps(j) = R::rgamma(a_sigma + 0.5 * n, 1 / (b_sigma + 0.5 * arma::accu(arma::pow(Z_res.col(j), 2))));
     }
-    // -------------------------------------------------------------------------
-    // DA MODIFICARE
+
     // 6 - update GammaB
     pred = wB * Gamma;
     logit = arma::exp(pred) / (1 + arma::exp(pred));
-    // 6.1 Update phi_L
+    
+    // 6.1 Update phi_L -> questo rimane uguale
     arma::mat Phi_L = arma::ones(p, k);
     arma::uvec Phi0 = arma::find(Phi == 0);
     arma::vec logit_phi0 = logit.elem(Phi0);
     arma::uvec which_zero = arma::randu(logit_phi0.n_elem) < (1 - logit_phi0) / (1 - logit_phi0 * p_constant);
     Phi_L.elem(Phi0.elem(arma::find(which_zero))) -= 1;
-    // 6.2 Polya gamma
+    
+    // 6.2 Polya-Gamma sampling for proposal (rimane uguale -> usiamo la proposal)
     arma::mat Dt(p, k);
     for (j = 0; j < k; j++) {
       for (i = 0; i < p; i++) {
         Dt(i, j) = samplepg(pred(i, j));
       }
     }
-    // 6.3 Update gammaB
+
+    // 6.3 Metropolis-Hastings update for GammaB
     arma::mat Bh_1 = arma::diagmat(arma::ones(qB) / pow(sd_gammaB, 2));
-    for (h = 0; h < k; h++) {
-      Gamma.col(h) = update_gamma(h, wB, Dt, Bh_1, Phi_L);
+    int accepted_this_iter = 0;
+    // Loop over all columns of Gamma
+    for (int h = 0; h < k; h++) {
+      bool accepted = sample_gamma_MH(h, Gamma, Phi_L, Dt, Delta, wB, Bh_1, 
+                                  p_constant, scale_factor_MH, p);
+      if (accepted) accepted_this_iter++;
     }
+
+    double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
+
+    // -------------------------------------------------------------------------
+    // 9 - update Phi --> da anticipare dopo step 6
+    //pred = wB * Gamma;
+    //logit = arma::exp(pred) / (1 + arma::exp(pred));
+    //Phi = update_Phi(Phi, rho, logit, p_constant, eta, Lambda_star, y, ps);
+    
+    pred = wB * Gamma;
+    logit = arma::exp(pred) / (1 + arma::exp(pred));
+    for (h = 0; h < k; h++) {
+    
+    // Step 1: Update phi_jh for potential new pivots (j in L(l_{r,-h}))
+    update_phi_potential_pivots(h, Phi, Delta, rho, logit, p_constant,
+                                 y, eta, Lambda_star, ps, n, p);
+    
+    // Step 2: Identify new pivot location l_h
+    int l_h = -1;  // -1 means no pivot found
+    for (int j = 0; j < p; j++) {
+      // Check if j is in L(l_{r,-h})
+      bool in_L = true;
+      for (int hh = 0; hh < k; hh++) {
+        if (hh != h && Delta(j, hh) == 1) {
+          in_L = false;
+          break;
+        }
+      }
+      
+      // If j is in L and phi_jh = 1, it's the pivot
+      if (in_L && Phi(j, h) == 1) {
+        l_h = j;
+        break;  // Take the first one
+      }
+    }
+    
+    // Step 2.5: Update Delta based on pivot (set delta_jh = 0 for j < l_h)
+    // This ensures that positions before the pivot are set to 0
+    update_delta_column(h, l_h, Phi, Delta, p);
+    
+    // Step 3: Update remaining phi_jh (j NOT in L(l_{r,-h}))
+    update_phi_remaining(h, l_h, Phi, Delta, rho, logit, p_constant,
+                         y, eta, Lambda_star, ps, n, p);
+    
+    // Step 4: Final update of Delta to reflect all phi changes
+    // delta_jh = phi_jh for j >= l_h (if l_h exists)
+    update_delta_column(h, l_h, Phi, Delta, p);
+  }
+
     // -------------------------------------------------------------------------
     // 7 - update Lambda_star and Lambda -> SAME
     arma::mat etarho = trans(eta.each_row() % trans(rho));
@@ -417,11 +595,6 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
     v(k - 1) = 1;
     w = v % join_elem(1, arma::cumprod(1 - v.head(k - 1)));
     // -------------------------------------------------------------------------
-    // 9 - update Phi --> da anticipare dopo step 6
-    pred = wB * Gamma;
-    logit = arma::exp(pred) / (1 + arma::exp(pred));
-    Phi = update_Phi(Phi, rho, logit, p_constant, eta, Lambda_star, y, ps);
-    // -------------------------------------------------------------------------
     // save sampled values (after burn-in period)
     if ((it + 1) % thin == 0 && (it + 1) > burn) {
       if(out.containsElementNamed("gamma")) { GAMMA[ind] = Gamma; }
@@ -429,6 +602,7 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
       if(out.containsElementNamed("lambda")) { LAMBDA[ind] = Lambda; }
       if(out.containsElementNamed("sigmacol")) { SIG[ind] = ps; }
       if(out.containsElementNamed("numFactors")) { K[ind] = kstar; }
+      if(out.containsElementNamed("accRate")) { ACC_RATE[ind] = acceptance_rate; }
       ind += 1;
     }
     // -------------------------------------------------------------------------
@@ -479,7 +653,9 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
   if(out.containsElementNamed("lambda")) { out["lambda"] = LAMBDA; }
   if(out.containsElementNamed("sigmacol")) { out["sigmacol"] = SIG; }
   if(out.containsElementNamed("numFactors")) { out["numFactors"] = K; }
+  if(out.containsElementNamed("accRate")) { out["accRate"] = ACC_RATE; }
   // ---------------------------------------------------------------------------
   return out;
   // ---------------------------------------------------------------------------
 }
+
