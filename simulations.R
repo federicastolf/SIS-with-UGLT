@@ -10,7 +10,7 @@ p = 30
 k = 10
 sd_gamma0 = 1
 cp0 = 0.5
-sigma_sq = 0.5
+sigma_sq = 0.1
 mseed = 434
 xf = as.factor(c(rep(1,p/3), rep(2,p/3), rep(3,p/3)))
 cov = model.matrix(~xf) # X matrix
@@ -39,6 +39,7 @@ fit1 = gibbs_adaptive(y, cov, nrun, burn, thin, mseed, verbose = T, p_constant,
                       b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
                       b_theta, sd_gammaB, scale_factor_MH)
 
-vec = sapply(fit1$gamma, function(m) m[3, 4])
+vec = sapply(fit1$gamma, function(m) m[1, 4])
 plot(vec, type="l")
+
 
