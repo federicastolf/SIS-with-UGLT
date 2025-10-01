@@ -238,28 +238,92 @@ int update_d(const int& h, const arma::mat& Phi, const arma::vec& rho,
   return Rcpp::which_max(d);
 }
 
-/* -------------------------------------------------------------------------- */
 
-// Update Phi in the Adaptive Gibbs Sampler
+/* -------------------------------------------------------------------------- */
+// Update Delta based on pivot location
+//   - delta_jh = 0 for all j < l_h
+//   - delta_jh = phi_jh for all j >= l_h
+void update_delta_column(int h, int l_h, const arma::mat& Phi, arma::mat& Delta) {
+  Delta = Phi;
+  // Set delta_jh = 0 for all j < l_h
+  for (int j = 0; j < l_h; j++) {
+    Delta(j, h) = 0.0;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+// Identify the pivot l_h as the first non-zero element in column h of Phi
+// that is not a pivot in other columns
+// Returns: pivot location l_h (or -1 if no pivot found)
+int identify_pivot(int h, const arma::mat& Phi, const arma::mat& Delta, int p) {
+  for (int j = 0; j < p; j++) {
+    // Check if j is in L(l_{r,-h}): not a pivot in other columns
+    bool in_L = true;
+    for (int hh = 0; hh < Delta.n_cols; hh++) {
+      if (hh != h && Delta(j, hh) == 1) {
+        in_L = false;
+        break;
+      }
+    }
+    // If j is in L and phi_jh = 1, it's the pivot
+    if (in_L && Phi(j, h) == 1) {
+      return j;
+    }
+  }
+  return -1;  // No pivot found
+}
+
+/* -------------------------------------------------------------------------- */
+// Calculate  varpi_jh = pr(l_h < j | l_{r,-h})
+// = 1 - prod_{m in L(l_{r,-h}), m<j} {1 - logit^{-1}(w_m^T gamma_h) * c_p}
 //
-// @param rho A k-dimensional vector.
-// @param logit A pxk matrix.
-// @param p_constant A number in (0,1).
-// @param p An integer.
-// @param n An integer.
-// @param eta A nxk matrix.
-// @param lambdastar A pxk matrix.
-// @param Phi A pxk matrix.
-// @param Z A nxp matrix.
-// @param ps A p-dimensional vector.
-// @param k An integer.
+// Arguments:
+//   j: row index
+//   h: column index
+//   Delta: indicator matrix for pivots in other columns
+//   logit: matrix of logit probabilities
+//   p_constant: constant c_p
 //
-// @return A pxk matrix.
+// Returns: varpi_jh probability
+double calculate_varpi(int j, int h, const arma::mat& Delta, 
+                       const arma::mat& logit, double p_constant) {
+  double prod = 1.0;
+  // Loop over all m < j that are in L(l_{r,-h})
+  for (int m = 0; m < j; m++) {
+    // Check if m is in L(l_{r,-h}): no other column has pivot at m
+    bool in_L = true;
+    for (int hh = 0; hh < Delta.n_cols; hh++) {
+      if (hh != h && Delta(m, hh) == 1) {
+        in_L = false;
+        break;
+      }
+    }
+    if (in_L) {
+      prod *= (1.0 - logit(m, h) * p_constant);
+    }
+  }
+  return 1.0 - prod;
+}
+
+/* -------------------------------------------------------------------------- */
+// Update Phi for potential pivots (j in L(l_{r,-h}))
 //
-// @note This function uses \code{Rcpp} for computational efficiency.
-arma::mat update_Phi(arma::mat& Phi, const arma::vec& rho, const arma::mat& logit,
-                     const double& p_constant, const arma::mat& eta,
-                     const arma::mat& lambdastar, const arma::mat& Z, const arma::vec& ps) {
+// @param Phi A pxk matrix (modified in place)
+// @param Delta A pxk indicator matrix for pivot locations
+// @param rho A k-dimensional vector
+// @param logit A pxk matrix
+// @param p_constant A number in (0,1)
+// @param eta A nxk matrix
+// @param lambdastar A pxk matrix
+// @param Z A nxp matrix (observed data)
+// @param ps A p-dimensional vector (precisions)
+//
+// @note This function updates only entries j in L(l_{r,-h}) for each column h
+void update_phi_potential_pivots(arma::mat& Phi, const arma::mat& Delta, 
+                                  const arma::vec& rho, const arma::mat& logit, 
+                                  double p_constant, const arma::mat& eta, 
+                                  const arma::mat& lambdastar, const arma::mat& Z, 
+                                  const arma::vec& ps) {
   // define variables
   int k = Phi.n_cols;
   int n = eta.n_rows;
@@ -270,14 +334,32 @@ arma::mat update_Phi(arma::mat& Phi, const arma::vec& rho, const arma::mat& logi
   arma::uvec wr0 = find(rho == 0);
   arma::uvec wr1 = find(rho == 1);
   arma::vec sdy = sqrt(1 / ps);
+  
+  // Precompute L(l_{r,-h}) for each column h
+  // in_L(j,h) = 1 if j is in L(l_{r,-h}), 0 otherwise
+  arma::mat in_L = arma::ones(p, k);
+  for (h = 0; h < k; h++) {
+    for (j = 0; j < p; j++) {
+      // Check if j is a pivot in any other column
+      for (int hh = 0; hh < k; hh++) {
+        if (hh != h && Delta(j, hh) == 1) {
+          in_L(j, h) = 0;
+          break;
+        }
+      }
+    }
+  }
   // update for inactive factors
   for (f = 0; f < wr0.n_elem; f++) {
     h = wr0(f);
     p_phi0 = 1 - logit.col(h) * p_constant;
     p_phi1 = logit.col(h) * p_constant;
     p_phi_sum = p_phi0 + p_phi1;
+    // Update only for j in L(l_{r,-h})
     for (j = 0; j < p; j++) {
-      Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      if (in_L(j, h) == 1) {
+        Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      }
     }
   }
   // update for active factors
@@ -285,17 +367,21 @@ arma::mat update_Phi(arma::mat& Phi, const arma::vec& rho, const arma::mat& logi
     h = wr1(f);
     lnorm0 = arma::zeros(p);
     lnorm1 = arma::zeros(p);
+    // Compute log-likelihoods only for j in L(l_{r,-h})
     for (j = 0; j < p; j++) {
+      if (in_L(j, h) == 0) continue;  // Skip if j not in L(l_{r,-h})
       for (i = 0; i < n; i++) {
-        // initialize mean
-        double muijh = -1 * rho(h) * Phi(j, h) * lambdastar(j, h) * eta(i, h);
+        // initialize mean (phi_jh = 0)
+        double muijh0 = 0.0;
         for (l = 0; l < k; l++) {
-            muijh += rho(l) * Phi(j, l) * lambdastar(j, l) * eta(i, l);
+          if (l != h) {
+            muijh0 += rho(l) * Phi(j, l) * lambdastar(j, l) * eta(i, l);
+          }
         }
-        lnorm0(j) += R::dnorm(Z(i, j), muijh, sdy(j), 1);
-        // update mean
-        muijh += rho(h) * lambdastar(j, h) * eta(i, h);
-        lnorm1(j) += R::dnorm(Z(i, j), muijh, sdy(j), 1);
+        lnorm0(j) += R::dnorm(Z(i, j), muijh0, sdy(j), 1);
+        // update mean (phi_jh = 1)
+        double muijh1 = muijh0 + rho(h) * lambdastar(j, h) * eta(i, h);
+        lnorm1(j) += R::dnorm(Z(i, j), muijh1, sdy(j), 1);
       }
       // adjust the scale
       double mlnorm = std::max(lnorm0(j), lnorm1(j));
@@ -305,11 +391,159 @@ arma::mat update_Phi(arma::mat& Phi, const arma::vec& rho, const arma::mat& logi
     p_phi0 = exp(lnorm0 + log(1 - logit.col(h) * p_constant));
     p_phi1 = exp(lnorm1 + log(logit.col(h) * p_constant));
     p_phi_sum = p_phi0 + p_phi1;
+    // Update only for j in L(l_{r,-h})
     for (j = 0; j < p; j++) {
-      Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      if (in_L(j, h) == 1) {
+        Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      }
     }
   }
-  return Phi;
+}
+
+
+/* -------------------------------------------------------------------------- */
+// Update remaining phi_jh (j NOT in L(l_{r,-h})) - positions that CANNOT be 
+// pivots. These are positions that ARE pivots in other columns
+//
+// Arguments:
+//   Phi: matrix of local scales (modified in place)
+//   Delta: indicator matrix (current pivot locations)
+//   rho: vector indicating active/inactive factors
+//   logit: matrix of logit probabilities
+//   p_constant: constant c_p
+//   eta: factor scores
+//   lambdastar: loadings matrix (tilde lambda)
+//   Z: observed data matrix
+//   ps: precision vector
+void update_phi_remaining(arma::mat& Phi, const arma::mat& Delta,
+                          const arma::vec& rho, const arma::mat& logit,
+                          double p_constant, const arma::mat& eta,
+                          const arma::mat& lambdastar, const arma::mat& Z,
+                          const arma::vec& ps) {
+  
+  // define variables
+  int k = Phi.n_cols;
+  int n = eta.n_rows;
+  int p = Phi.n_rows;
+  int i, j, l, h;
+  arma::uword f;
+  arma::vec p_phi0(p), p_phi1(p), p_phi_sum(p), lnorm0(p), lnorm1(p);
+  arma::uvec wr0 = find(rho == 0);
+  arma::uvec wr1 = find(rho == 1);
+  arma::vec sdy = sqrt(1 / ps);
+  // Identify pivot locations
+  arma::vec pivot_loc(k);
+  for (h = 0; h < k; h++) {
+    pivot_loc(h) = identify_pivot(h, Phi, Delta, p);
+  }
+  // Precompute NOT in L(l_{r,-h}) for each column h
+  // not_in_L(j,h) = 1 if j is NOT in L(l_{r,-h}), 0 otherwise
+  arma::mat not_in_L = arma::zeros(p, k);
+  for (h = 0; h < k; h++) {
+    for (j = 0; j < p; j++) {
+      // Check if j is a pivot in any other column
+      for (int hh = 0; hh < k; hh++) {
+        if (hh != h && Delta(j, hh) == 1) {
+          not_in_L(j, h) = 1;
+          break;
+        }
+      }
+    }
+  }
+  // update for inactive factors
+  for (f = 0; f < wr0.n_elem; f++) {
+    h = wr0(f); 
+    // Compute varpi for all j
+    arma::vec varpi(p);
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        varpi(j) = calculate_varpi(j, h, Delta, logit, p_constant);
+      }
+    }
+    // Prior probabilities with varpi adjustment
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        double prior_prob = std::min(p_constant * logit(j, h) / varpi(j), 1.0);
+        p_phi0(j) = 1.0 - prior_prob;
+        p_phi1(j) = prior_prob;
+      } else {
+        p_phi0(j) = 1.0;
+        p_phi1(j) = 0.0;
+      }
+    }
+    p_phi_sum = p_phi0 + p_phi1;
+    // Update only for j NOT in L(l_{r,-h})
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      }
+    }
+  }
+  // update for active factors
+  for (f = 0; f < wr1.n_elem; f++) {
+    h = wr1(f);
+    int l_h = pivot_loc(h); 
+    // Compute varpi for all j
+    arma::vec varpi(p);
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        varpi(j) = calculate_varpi(j, h, Delta, logit, p_constant);
+      }
+    }
+    lnorm0 = arma::zeros(p);
+    lnorm1 = arma::zeros(p);
+    // Compute log-likelihoods
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 0) continue;  // Skip if j in L(l_{r,-h})
+      // Case: l_h > j or l_h not found - sample from prior only
+      if (l_h < 0 || l_h > j) {
+        // Will use prior only (likelihoods stay at 0)
+        continue;
+      }
+      // Case: j > l_h - use full conditional
+      for (i = 0; i < n; i++) {
+        // initialize mean (phi_jh = 0)
+        double muijh0 = 0.0;
+        for (l = 0; l < k; l++) {
+          if (l != h) {
+            muijh0 += rho(l) * Delta(j, l) * lambdastar(j, l) * eta(i, l);
+          }
+        }
+        lnorm0(j) += R::dnorm(Z(i, j), muijh0, sdy(j), 1);
+        // update mean (phi_jh = 1)
+        double muijh1 = muijh0 + rho(h) * lambdastar(j, h) * eta(i, h);
+        lnorm1(j) += R::dnorm(Z(i, j), muijh1, sdy(j), 1);
+      }
+      // adjust the scale
+      double mlnorm = std::max(lnorm0(j), lnorm1(j));
+      lnorm0(j) -= mlnorm;
+      lnorm1(j) -= mlnorm;
+    }
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        double prior_prob = std::min(p_constant * logit(j, h) / varpi(j), 1.0);
+        // If l_h < 0 or l_h > j, use prior only
+        if (l_h < 0 || l_h > j) {
+          p_phi0(j) = 1.0 - prior_prob;
+          p_phi1(j) = prior_prob;
+        } else {
+          // Use full conditional
+          p_phi0(j) = exp(lnorm0(j) + log(1.0 - prior_prob));
+          p_phi1(j) = exp(lnorm1(j) + log(prior_prob));
+        }
+      } else {
+        p_phi0(j) = 1.0;
+        p_phi1(j) = 0.0;
+      }
+    }
+    p_phi_sum = p_phi0 + p_phi1;
+    // Update only for j NOT in L(l_{r,-h})
+    for (j = 0; j < p; j++) {
+      if (not_in_L(j, h) == 1) {
+        Phi(j, h) = R::runif(0, 1) * p_phi_sum(j) < p_phi1(j);
+      }
+    }
+  }
 }
 
 
@@ -449,8 +683,8 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L, const arma
 // Implementation in C++ of the Adaptive Gibbs Sampler (AGS) for a Generalized Infinite Factor model with Structured Increasing Shrinkage (SIS) prior.
 //
 // [[Rcpp::export]]
-Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_theta, double b_theta,
-  double sd_gammaB, double p_constant,
+Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_theta, 
+  double b_theta, double sd_gammaB, double p_constant,
   arma::mat y, 
   arma::mat wB,
   int burn, int nrun, int thin, int start_adapt, int kmax,
@@ -531,41 +765,22 @@ Rcpp::List Rcpp_cosin(double alpha, double a_sigma, double b_sigma, double a_the
     pred = wB * Gamma;
     logit = arma::exp(pred) / (1 + arma::exp(pred));
     for (h = 0; h < k; h++) {
-    
     // Step 1: Update phi_jh for potential new pivots (j in L(l_{r,-h}))
-    update_phi_potential_pivots(h, Phi, Delta, rho, logit, p_constant,
-                                 y, eta, Lambda_star, ps, n, p);
-    
-    // Step 2: Identify new pivot location l_h
-    int l_h = -1;  // -1 means no pivot found
-    for (int j = 0; j < p; j++) {
-      // Check if j is in L(l_{r,-h})
-      bool in_L = true;
-      for (int hh = 0; hh < k; hh++) {
-        if (hh != h && Delta(j, hh) == 1) {
-          in_L = false;
-          break;
-        }
-      }
-      
-      // If j is in L and phi_jh = 1, it's the pivot
-      if (in_L && Phi(j, h) == 1) {
-        l_h = j;
-        break;  // Take the first one
-      }
+    update_phi_potential_pivots(Phi, Delta, rho, logit, p_constant, 
+                               eta, Lambda_star, y, ps);
+    // Step 2: Identify new pivot locations and update Delta
+    for (h = 0; h < k; h++) {
+      int l_h = identify_pivot(h, Phi, Delta, p);
+      update_delta_column(h, l_h, Phi, Delta);
     }
-    
-    // Step 2.5: Update Delta based on pivot (set delta_jh = 0 for j < l_h)
-    // This ensures that positions before the pivot are set to 0
-    update_delta_column(h, l_h, Phi, Delta, p);
-    
     // Step 3: Update remaining phi_jh (j NOT in L(l_{r,-h}))
-    update_phi_remaining(h, l_h, Phi, Delta, rho, logit, p_constant,
-                         y, eta, Lambda_star, ps, n, p);
-    
+    update_phi_remaining(Phi, Delta, rho, logit, p_constant, 
+                       eta, Lambda_star, y, ps);
     // Step 4: Final update of Delta to reflect all phi changes
-    // delta_jh = phi_jh for j >= l_h (if l_h exists)
-    update_delta_column(h, l_h, Phi, Delta, p);
+    for (h = 0; h < k; h++) {
+      int l_h = identify_pivot(h, Phi, Delta, p);
+      update_delta_column(h, l_h, Phi, Delta);
+    }
   }
 
     // -------------------------------------------------------------------------

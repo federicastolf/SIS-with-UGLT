@@ -1,9 +1,16 @@
+library(Rcpp)
+library(RcppArmadillo)
+
+sourceCpp("Cwrapper.cpp")
+
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
-                          kinit = NULL, kmax = NULL, b0, b1, start_adapt, alpha,
-                          a_sigma, b_sigma, a_theta, b_theta, sd_gammaB){
+                           b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
+                          b_theta, sd_gammaB, scale_factor_MH, kinit = NULL, 
+                          kmax = NULL){
   set.seed(mseed)
   p = dim(y)[2]
   n = dim(y)[1]
+  qB = dim(wB)[2]
   if(is.null(kmax)) {
     kmax = p + 1
   }
@@ -16,10 +23,6 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # adaptive probability
   prob = 1 / exp(b0 + b1 * seq(1, nrun))
   uu = runif(nrun)
-  # set c_p
-  if(is.null(p_constant)) {
-    p_constant = 10*exp(1)*log(p)/p
-  }
   
   #-----------# Initialization #-------------#
   ps = rgamma(p, a_sigma, b_sigma) # sigma^-2
@@ -42,7 +45,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
   
   # pivots
-  Lcal = c(1:n) # set of all possible values for l
+  Lcal = c(1:p) # set of all possible values for l
   lpiv = sample(Lcal, k, replace = F) # pivots vector
   Delta = matrix(0, p, k) # sparsity matrix
   for(i in 1:k){
@@ -58,7 +61,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   )
   
   out = list("numFactors" = NA)
-  if("gamma" %in% output) out["gammaB"] = NA
+  if("gamma" %in% output) out["gamma"] = NA
   if("eta" %in% output) out["eta"] = NA
   if("lambda" %in% output) out["lambda"] = NA
   if("sigmacol" %in% output) out["sigmacol"] = NA 
@@ -68,10 +71,11 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # -------------------------------------------------------------------------- #
   # ADAPTIVE GIBBS SAMPLING
   # -------------------------------------------------------------------------- #
-  out = Rcpp_cosin(alpha, a_sigma, b_sigma, a_theta, b_theta, sd_gammaB, p_constant,
-                   y, wB, burn, nrun, thin, start_adapt, kmax, eta, Gamma, Lambda,
+  out = Rcpp_gibbs(alpha, a_sigma, b_sigma, a_theta, b_theta, sd_gammaB, p_constant,
+                   y, wB, burn, nrun, thin, start_adapt, kmax, 
+                   eta, GammaB, Lambda,
                    Lambda_star, d, kstar, logit, rho, Phi, Plam, pred, ps, v, w, 
-                   out, verbose, uu, prob, sp, lpiv, Delta)
+                   out, verbose, uu, prob, sp, lpiv, Delta, scale_factor_MH)
   # -------------------------------------------------------------------------- #
   if ("sigmacol" %in% output) out[["sigmacol"]] <- lapply(out[["sigmacol"]], c)
   out[["numFactors"]] <- c(out[["numFactors"]])
@@ -79,7 +83,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   out[["y"]] <- y                 # data                       : nxp
   out[["wB"]]  <- wB              # biological meta-covariates : pxqB
   out[["hyperparameters"]] <- list(alpha = alpha, a_theta = a_theta,
-                                   b_theta = b_theta, sd_beta = sd_beta, 
+                                   b_theta = b_theta, 
                                    sd_gammaB = sd_gammaB, a_sigma = a_sigma, 
                                    b_sigma = b_sigma, p_constant = p_constant)
   
