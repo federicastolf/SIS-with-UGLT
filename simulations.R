@@ -39,7 +39,8 @@ fit1 = gibbs_adaptive(y, cov, nrun, burn, thin, mseed, verbose = T, p_constant,
                       b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
                       b_theta, sd_gammaB, scale_factor_MH)
 
-vec = sapply(fit1$gamma, function(m) m[1, 4])
+summary(fit1$accRate) 
+vec = sapply(fit1$gamma, function(m) m[3, 4])
 plot(vec, type="l")
 
 
