@@ -720,7 +720,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
 
     // -------------------------------------------------------------------------
-    // Update Phi (using pivot-aware sampling)
+    // Update Phi 
     pred = wB * Gamma;
     logit = arma::exp(pred) / (1 + arma::exp(pred));
 
@@ -730,22 +730,17 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       int h = h_order(idx);
       // 1. Compute L membership for column h
       arma::vec in_L_h = compute_L_membership_single(h, Delta, p);
-  
       // 2. Update potential pivots
       update_phi_potential_pivots_single(h, Phi, in_L_h, rho, logit, p_constant, 
                                  eta, Lambda_star, y, ps);
-  
       // 3. Identify pivot for column h
       int l_h = identify_pivot(h, Phi, Delta, p);
       pivots(h) = l_h;  
-  
       // 4. Update Delta for column h
       update_delta_column(h, l_h, Phi, Delta);
-  
       // 5. Recompute membership after Delta update
       arma::vec in_L_h_updated = compute_L_membership_single(h, Delta, p);
       arma::vec not_in_L_h = arma::ones(p) - in_L_h_updated;
-  
       // 6. Update remaining positions
       update_phi_remaining_single(h, Phi, not_in_L_h, l_h, rho, logit, p_constant, 
                          eta, Lambda_star, y, ps, Delta);
