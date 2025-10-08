@@ -415,7 +415,7 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
                                   const arma::mat& logit, double p_constant, 
                                   const arma::mat& eta, const arma::mat& lambdastar, 
                                   const arma::mat& Z, const arma::vec& ps, 
-                                  const arma::mat& Delta, double cMH) {
+                                  const arma::mat& Delta) {
   
   int k = Phi.n_cols;
   int n = eta.n_rows;
@@ -435,7 +435,7 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
     // Inactive factor
     for (j = 0; j < p; j++) {
       if (not_in_L_h(j) == 1) {
-        double prior_prob = std::min(p_constant * logit(j, h) / varpi(j), 1.0 - cMH);
+        double prior_prob = p_constant * std::min(logit(j, h) / varpi(j), 1.0);
         p_phi0(j) = 1.0 - prior_prob;
         p_phi1(j) = prior_prob;
       } else {
@@ -477,7 +477,7 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
     
     for (j = 0; j < p; j++) {
       if (not_in_L_h(j) == 1) {
-        double prior_prob = std::min(p_constant * logit(j, h) / varpi(j), 1.0-cMH);
+        double prior_prob = p_constant*std::min(logit(j, h) / varpi(j), 1.0);
         if (l_h < 0 || l_h > j) {
           p_phi0(j) = 1.0 - prior_prob;
           p_phi1(j) = prior_prob;
@@ -553,7 +553,7 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L,
                      const arma::mat& Phi, const arma::mat& in_L, 
                      const arma::mat& Delta, const arma::mat& wB, 
                      const arma::mat& Bh_1, double p_constant,
-                     double scale_factor_MH, int p, double cMH) {
+                     double scale_factor_MH, int p) {
   
   arma::vec gamma_h_current = Gamma.col(h);
   
@@ -589,8 +589,8 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L,
        // For j NOT in L(l_{r,-h}): pr(φ_jh=1) = min{c_p * logit / varpi_jh, 1}
       double varpi_i_current = calculate_varpi_single(i, h, Delta, logit_current, p_constant);
       double varpi_i_prop = calculate_varpi_single(i, h, Delta, logit_prop, p_constant);
-      prob_current = std::min(p_constant * logit_current(i) / varpi_i_current, 1.0-cMH);
-      prob_prop = std::min(p_constant * logit_prop(i) / varpi_i_prop, 1.0-cMH);
+      prob_current = p_constant*std::min(logit_current(i) / varpi_i_current, 1.0);
+      prob_prop = p_constant*std::min(logit_prop(i) / varpi_i_prop, 1.0);
       //prob_current = std::min(p_constant * logit_current(i), 1.0);
       //prob_prop = std::min(p_constant * logit_prop(i), 1.0);
     }
@@ -714,7 +714,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     int accepted_this_iter = 0;
     for (h = 0; h < k; h++) {
       bool accepted = sample_gamma_MH(h, Gamma, Phi_L, Phi, in_L, Delta, wB, Bh_1, 
-                                p_constant, scale_factor_MH, p, cMH);
+                                p_constant, scale_factor_MH, p);
       if (accepted) accepted_this_iter++;
     }
     double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
@@ -743,7 +743,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       arma::vec not_in_L_h = arma::ones(p) - in_L_h_updated;
       // 6. Update remaining positions
       update_phi_remaining_single(h, Phi, not_in_L_h, l_h, rho, logit, p_constant, 
-                         eta, Lambda_star, y, ps, Delta, cMH);
+                         eta, Lambda_star, y, ps, Delta);
 }
 
     // -------------------------------------------------------------------------
