@@ -37,7 +37,7 @@ sd_gammaB = 1 # Standard deviation for \eqn{\gamma_{hB}} prior distribution.
 p_constant = 0.2
 # p_constant <-  exp(2)* log(p) / p
 scale_factor_MH = 1
-cMH = 0 # in pratica uguale al tasso di accetazione medio
+cMH = 0.7
 
 fit1 = gibbs_adaptive(y, cov, nrun, burn, thin, mseed, verbose = T, p_constant,
                       b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
