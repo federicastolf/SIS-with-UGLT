@@ -1,9 +1,7 @@
 library(Rcpp)
 library(RcppArmadillo)
 
-#sourceCpp("Cwrapper.cpp")
-sourceCpp("Cwrapper_out.cpp")
-
+sourceCpp("Cwrapper.cpp")
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
                            b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
                           b_theta, sd_gammaB, scale_factor_MH, cMH, kinit = NULL, 
