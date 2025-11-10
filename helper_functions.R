@@ -1,9 +1,9 @@
 # function to simulate synthetic data
-simulate_data = function(n, p, k, cov, sd_gamma, cp, sigma_sq, mseed){
+simulate_data = function(n, p, k, covariate, sd_gamma, cp, sigma_sq, mseed){
   set.seed(mseed)
-  q = dim(cov)[2]
+  q = dim(covariate)[2]
   gamma = matrix(rnorm(q*p, sd = sd_gamma), q,p) # regression coefficient
-  pilogit = cp*plogis(cov %*% gamma) 
+  pilogit = cp*plogis(covariate %*% gamma) 
   get_phi = simPhi(p, k, pilogit)
   Phi = get_phi$Phi
   theta_inv = rgamma(k,1,1)
@@ -15,7 +15,7 @@ simulate_data = function(n, p, k, cov, sd_gamma, cp, sigma_sq, mseed){
   }
   M = matrix(rnorm(n*k, 0, 1), ncol=k) # factor scores
   # data
-  Y = M %*% t(Lambda) + sqrt(sigma_sq)*matrix(rnorm(n*p), nrow=n) 
+  Y = M %*% t(Lambda) + sqrt(sigma_sq)*matrix(rnorm(n*p), nrow = n, ncol = p) 
   return(list("Y" = Y, "Lambda" = Lambda, "Phi"=Phi, "pivot"=get_phi$pivot,
               "delta"=get_phi$Delta, "gamma"=gamma))
 }

@@ -35,7 +35,6 @@ a_theta = 1
 b_theta = 1
 sd_gammaB = 1 # Standard deviation for \eqn{\gamma_{hB}} prior distribution.
 p_constant = 0.2
-# p_constant <-  exp(2)* log(p) / p
 scale_factor_MH = 1
 cMH = 0.7
 
@@ -48,11 +47,14 @@ vec = sapply(fit1$gamma, function(m) m[1, 2])
 plot(vec, type="l")
 
 Lambda_outer <- lapply(fit1$lambda, function(A) A %*% t(A))
-covariance <- lapply(Lambda_outer, function(x) (x != 0) * 1)
-cov_mean = apply(simplify2array(covariance), c(1, 2), mean)
+# covariance <- lapply(Lambda_outer, function(x) (x != 0) * 1)
+cov_mean = apply(simplify2array(Lambda_outer), c(1, 2), mean)
 
 p1 = pheatmap(cov_mean, treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
-              cluster_cols = F, border_color ="NA", legend=F,
-              color = colorRampPalette(c("white", "blue"))(60),
-              breaks = seq(min(cov_mean),max(cov_mean), length.out = 60))
+              cluster_cols = F, border_color ="NA", legend=F)
 p1
+
+Lambda_outer_true = data_synt$Lambda %*% t(data_synt$Lambda) 
+pheatmap(Lambda_outer_true, treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
+         cluster_cols = F, border_color ="NA", legend=F)
+
