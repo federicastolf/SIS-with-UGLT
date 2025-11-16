@@ -56,7 +56,8 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   output = c("gamma",      # shrinkCoefSamples    : qBxk
              "eta",         # etaval               : nxk
              "lambda",      # loadSamples          : pxk
-             "sigmacol"     # sigmacol (1/sigma^2) : p
+             "sigmacol",     # sigmacol (1/sigma^2) : p
+             "activeFactors"     # rho : k
   )
   
   out = list("numFactors" = NA)
@@ -64,6 +65,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   if("eta" %in% output) out["eta"] = NA
   if("lambda" %in% output) out["lambda"] = NA
   if("sigmacol" %in% output) out["sigmacol"] = NA 
+  if("activeFactors" %in% output) out["activeFactors"] = NA 
   
   # start time
   t0 = proc.time()

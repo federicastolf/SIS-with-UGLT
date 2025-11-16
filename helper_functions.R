@@ -68,3 +68,69 @@ simPhi = function(p, k, pilogit, NiterGibbs = 200){
   # return the last phi and delta
   return(list("Phi" = phi, "Delta"= delta, "pivot"=l))
 }
+
+
+# function to reorder and sign swap based on delta and lambda
+reorder_and_sign_swap <- function(delta, lambda) {
+  # Ensure both have same dimensions
+  if (!all(dim(delta) == dim(lambda))) {
+    stop("delta and lambda must have the same dimensions")
+  }
+  
+  p <- nrow(lambda)
+  k <- ncol(lambda)
+  
+  # Identify first nonzero position and sign for each column
+  pivot_pos <- rep(NA_integer_, k)
+  pivot_sign <- rep(1, k)
+  
+  for (h in seq_len(k)) {
+    nz <- which(lambda[, h] != 0)
+    if (length(nz) > 0) {
+      pivot_pos[h] <- nz[1]
+      pivot_sign[h] <- sign(lambda[nz[1], h])
+    } else {
+      pivot_pos[h] <- p + 1  # if column is all zeros, put it last
+    }
+  }
+  
+  # Order columns by first nonzero position
+  order_idx <- order(pivot_pos)
+  pivot_pos_sorted = sort(pivot_pos)
+  
+  # Apply the order
+  delta_new <- delta[, order_idx, drop = FALSE]
+  lambda_new <- lambda[, order_idx, drop = FALSE]
+  pivot_sign <- pivot_sign[order_idx]
+  
+  # Flip sign where needed
+  for (h in seq_len(k)) {
+    if (pivot_sign[h] < 0) {
+      lambda_new[, h] <- -lambda_new[, h]
+    }
+  }
+  
+  list(delta = delta_new, lambda = lambda_new, order = order_idx,
+       pivot_location = pivot_pos_sorted)
+}
+
+# find modal vector
+find_modal_vector <- function(pivot_list) {
+  # convert each vector to a string key
+  keys <- vapply(pivot_list, function(v) paste(v, collapse = ","), character(1))
+  
+  # count frequency
+  freq <- table(keys)
+  
+  # find the most frequent key
+  modal_key <- names(freq)[which.max(freq)]
+  
+  # convert back to numeric vector
+  if (nzchar(modal_key)) {
+    modal_vec <- as.integer(strsplit(modal_key, ",", fixed = TRUE)[[1]])
+  } else {
+    modal_vec <- integer(0)  # handle empty vector case
+  }
+  
+  list(mode = modal_vec, count = max(freq), freq_table = freq)
+}

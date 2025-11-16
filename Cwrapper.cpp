@@ -96,7 +96,7 @@ double dmvnorm_log(const arma::vec& x, const arma::vec& mu, const arma::mat& Sig
 
 /* -------------------------------------------------------------------------- */
 // Functions in this file:
-//  - truncnorm_lg
+//  - is_pivot_row
 //  - update_bmu
 //  - update_mu
 //  - update_eta
@@ -142,6 +142,18 @@ arma::mat update_eta(const arma::mat& Lambda, const arma::vec& ps, const arma::m
   arma::mat S = arma::inv(R);
   arma::mat eta = Z * Lmsg * S * trans(S) + rnorm_mat(n, k, 0, 1) * trans(S);
   return eta;
+}
+
+/* -------------------------------------------------------------------------- */
+
+// @param j An integer number.
+// @param hh An integer number.
+// @param Delta a binary matrix.
+// A row j is the pivot of column hh iff it's the first 1 in Delta(:,hh)
+inline bool is_pivot_row(int j, int hh, const arma::mat& Delta) {
+  if (Delta(j, hh) == 0) return false;
+  if (j == 0) return true;
+  return Delta(j - 1, hh) == 0;
 }
 
 
@@ -257,7 +269,8 @@ double calculate_varpi(int j, int h, const arma::mat& Delta,
     // Check if m is in L(l_{r,-h}): no other column has pivot at m
     bool in_L = true;
     for (int hh = 0; hh < Delta.n_cols; hh++) {
-      if (hh != h && Delta(m, hh) == 1) {
+      //if (hh != h && Delta(m, hh) == 1) {
+      if (hh != h && is_pivot_row(m, hh, Delta)){
         in_L = false;
         break;
       }
@@ -279,7 +292,8 @@ int identify_pivot(int h, const arma::mat& Phi, const arma::mat& Delta, int p) {
     // Check if j is in L(l_{r,-h}): not a pivot in other columns
     bool in_L = true;
     for (int hh = 0; hh < Delta.n_cols; hh++) {
-      if (hh != h && Delta(j, hh) == 1) {
+      //if (hh != h && Delta(j, hh) == 1) {
+      if (hh != h && is_pivot_row(j, hh, Delta)) {
         in_L = false;
         break;
       }
@@ -319,10 +333,13 @@ arma::mat compute_L_membership(const arma::mat& Delta, int p, int k) {
     for (int j = 0; j < p; j++) {
       // Check if j is a pivot in any other column
       for (int hh = 0; hh < k; hh++) {
-        if (hh != h && Delta(j, hh) == 1) {
+        
+        //if (hh != h && Delta(j, hh) == 1) {
+        if (hh != h && is_pivot_row(j, hh, Delta)) {
           in_L(j, h) = 0;
           break;
         }
+        
       }
     }
   }
@@ -338,10 +355,13 @@ arma::vec compute_L_membership_single(int h, const arma::mat& Delta, int p) {
   for (int j = 0; j < p; j++) {
     // Check if j is a pivot in any other column (excluding h)
     for (int hh = 0; hh < Delta.n_cols; hh++) {
-      if (hh != h && Delta(j, hh) == 1) {
+      
+      //if (hh != h && Delta(j, hh) == 1) {
+      if (hh != h && is_pivot_row(j, hh, Delta)) {
         in_L_h(j) = 0;
         break;
       }
+   
     }
   }
   return in_L_h;
@@ -514,7 +534,8 @@ double calculate_varpi_single(int j, int h, const arma::mat& Delta,
     // Check if m is in L(l_{r,-h}): no other column has pivot at m
     bool in_L = true;
     for (int hh = 0; hh < Delta.n_cols; hh++) {
-      if (hh != h && Delta(m, hh) == 1) {
+      //if (hh != h && Delta(m, hh) == 1) {
+      if (hh != h && is_pivot_row(m, hh, Delta)){
         in_L = false;
         break;
       }
@@ -669,6 +690,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   Rcpp::List LAMBDA(sp);
   Rcpp::List SIG(sp);
   Rcpp::List DELTA(sp);
+  Rcpp::List RHO(sp);
   arma::vec K(sp);
   arma::vec ACC_RATE(sp);
   
@@ -685,7 +707,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   
   for (it = 0; it < nrun; it++) {
     if(verbose && (it + 1) % 50 == 0) {
-      Rcout << it + 1 << " : " << k << " active factors\n";
+      Rcout << it + 1 << " : " << kstar << " active factors\n";
     }
 
     // -------------------------------------------------------------------------
@@ -789,6 +811,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       if(out.containsElementNamed("lambda")) { LAMBDA[ind] = Lambda; }
       if(out.containsElementNamed("sigmacol")) { SIG[ind] = ps; }
       if(out.containsElementNamed("numFactors")) { K[ind] = kstar; }
+      if(out.containsElementNamed("activeFactors")) { RHO[ind] = rho; }
       DELTA[ind] = Delta;
       ACC_RATE[ind] = acceptance_rate;
       ind += 1;
@@ -861,6 +884,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   if(out.containsElementNamed("lambda")) { out["lambda"] = LAMBDA; }
   if(out.containsElementNamed("sigmacol")) { out["sigmacol"] = SIG; }
   if(out.containsElementNamed("numFactors")) { out["numFactors"] = K; }
+  if(out.containsElementNamed("activeFactors")) { out["activeFactors"] = RHO; }
   out["delta"] = DELTA;
   out["accRate"] = ACC_RATE;
   
