@@ -51,60 +51,6 @@ reorder_blocks <- function(Sigma, Y, block_membership, new_block_order) {
 }
 
 
-# Covariance decreases with index
-simulate_decreasing_cov <- function(p, x = NULL, max_var, min_var, max_cor, 
-                                    min_cor, x_range = c(0, 10), mseed) {
-  set.seed(mseed)
-  # Generate covariate if not provided
-  if (is.null(x)) {
-    x <- seq(x_range[1], x_range[2], length.out = p)
-  } else {
-    if (length(x) != p) {
-      stop("Length of x must equal p")
-    }
-  }
-  # Normalize x to [0, 1]
-  x_min <- min(x)
-  x_max <- max(x)
-  x_norm <- (x - x_min) / (x_max - x_min)
-  
-  # Variances DECREASE linearly with x
-  # At x_min: max_var, at x_max: min_var
-  variances <- max_var - (max_var - min_var) * x_norm
-  sds <- sqrt(variances)
-  
-  # Correlation matrix: correlation DECREASES with x
-  R <- matrix(0, p, p)
-  
-  for (i in 1:p) {
-    for (j in 1:p) {
-      if (i == j) {
-        R[i, j] <- 1
-      } else {
-        # Correlation based on average of normalized x values
-        avg_x_norm <- (x_norm[i] + x_norm[j]) / 2
-        R[i, j] <- max_cor - (max_cor - min_cor) * avg_x_norm
-      }
-    }
-  }
-  
-  # Ensure positive definiteness
-  eigenvalues <- eigen(R, only.values = TRUE)$values
-  if (any(eigenvalues <= 0)) {
-    R <- as.matrix(Matrix::nearPD(R, corr = TRUE)$mat)
-    warning("Matrix adjusted for positive definiteness")
-  }
-  
-  # Create covariance matrix: Sigma = D * R * D
-  D <- diag(sds)
-  Sigma <- D %*% R %*% D
-  
-  Y <- mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
-  return(list(data = Y, Sigma = Sigma, x = x, x_norm = x_norm))
-}
-
-
-
 identify_lambda <- function(fit, p, nsample = NULL, 
                             return_delta = TRUE,
                             return_pivot_info = FALSE) {
