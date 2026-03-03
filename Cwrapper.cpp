@@ -435,7 +435,7 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
                                   const arma::mat& logit, double p_constant, 
                                   const arma::mat& eta, const arma::mat& lambdastar, 
                                   const arma::mat& Z, const arma::vec& ps, 
-                                  const arma::mat& Delta, double cMH) {
+                                  const arma::mat& Delta, double cMH, bool order_dependent) {
   
   int k = Phi.n_cols;
   int n = eta.n_rows;
@@ -448,7 +448,11 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
   arma::vec varpi(p);
   for (j = 0; j < p; j++) {
     if (not_in_L_h(j) == 1) {
-      varpi(j) = calculate_varpi(j, h, Delta, logit, p_constant);
+      if(order_dependence == TRUE) {
+            varpi(j) = 1.0;
+          } else {
+            varpi(j) = calculate_varpi(j, h, Delta, logit, p_constant);
+          }
     }
   }
   if (rho(h) == 0) {
@@ -681,7 +685,8 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   arma::vec v, arma::vec w,
   Rcpp::List out, bool verbose,
   arma::vec uu, arma::vec prob, int sp,
-  arma::vec pivots, arma::mat Delta, double scale_factor_MH, double cMH) {
+  arma::vec pivots, arma::mat Delta, double scale_factor_MH, double cMH,
+  bool order_dependent) {
   
   // ---------------------------------------------------------------------------
   // output
@@ -723,33 +728,39 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
 
     // -------------------------------------------------------------------------
     // Update GammaB with Metropolis-Hastings
-    pred = wB * Gamma;
-    logit = arma::exp(pred) / (1 + arma::exp(pred));
-    
-    // Precompute L(l_{r,-h}) membership once (used in MH step)
-    arma::mat in_L = compute_L_membership(Delta, p, k);
-    
-    // Update phi_L for MH proposal
-    arma::mat Phi_L = arma::ones(p, k);
-    arma::uvec Phi0 = arma::find(Phi == 0);
-    arma::vec logit_phi0 = logit.elem(Phi0);
-    arma::uvec which_zero = arma::randu(logit_phi0.n_elem) < (1 - logit_phi0) / (1 - logit_phi0 * p_constant);
-    Phi_L.elem(Phi0.elem(arma::find(which_zero))) -= 1;
-    
-    // Metropolis-Hastings update for GammaB
-    arma::mat Bh_1 = arma::diagmat(arma::ones(qB) / pow(sd_gammaB, 2));
-    int accepted_this_iter = 0;
-    for (h = 0; h < k; h++) {
-      bool accepted = sample_gamma_MH(h, Gamma, Phi_L, Phi, in_L, Delta, wB, Bh_1, 
-                                p_constant, scale_factor_MH, p, cMH);
-      if (accepted) accepted_this_iter++;
+    if( order_dependent == FALSE){
+        pred = wB * Gamma;
+        logit = arma::exp(pred) / (1 + arma::exp(pred));
+        
+        // Precompute L(l_{r,-h}) membership once (used in MH step)
+        arma::mat in_L = compute_L_membership(Delta, p, k);
+        
+        // Update phi_L for MH proposal
+        arma::mat Phi_L = arma::ones(p, k);
+        arma::uvec Phi0 = arma::find(Phi == 0);
+        arma::vec logit_phi0 = logit.elem(Phi0);
+        arma::uvec which_zero = arma::randu(logit_phi0.n_elem) < (1 - logit_phi0) / (1 - logit_phi0 * p_constant);
+        Phi_L.elem(Phi0.elem(arma::find(which_zero))) -= 1;
+        
+        // Metropolis-Hastings update for GammaB
+        arma::mat Bh_1 = arma::diagmat(arma::ones(qB) / pow(sd_gammaB, 2));
+        int accepted_this_iter = 0;
+        for (h = 0; h < k; h++) {
+          bool accepted = sample_gamma_MH(h, Gamma, Phi_L, Phi, in_L, Delta, wB, Bh_1, 
+                                    p_constant, scale_factor_MH, p, cMH);
+          if (accepted) accepted_this_iter++;
+        }
+        double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
+    } else {
+        double acceptance_rate = 1.0;
     }
-    double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
 
     // -------------------------------------------------------------------------
     // Update Phi 
-    pred = wB * Gamma;
-    logit = arma::exp(pred) / (1 + arma::exp(pred));
+    if( order_dependent == FALSE){
+      pred = wB * Gamma;
+      logit = arma::exp(pred) / (1 + arma::exp(pred));
+    }
 
     // loop over columns in random order
     arma::uvec h_order = arma::randperm(k);
@@ -757,21 +768,39 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       int h = h_order(idx);
       // 1. Compute L membership for column h
       arma::vec in_L_h = compute_L_membership_single(h, Delta, p);
-      // 2. Update potential pivots
+
+      // 2. Fill prior probability of phi 
+      
+       if(order_dependence == TRUE) {
+    	    int m = p - k + 1;
+          int l = 0; // counter for active entries seen so far
+        
+          for (int j = 0; j < p; j++) {
+            if (in_L_h[j] == 0) {
+                logit(j, h) = 1;
+            } else {
+                logit(j, h) = 1.0 / (p_constant*(m - l));
+                l++;
+            }
+        }
+        }
+
+      // 3. Update potential pivots
       update_phi_potential_pivots_single(h, Phi, in_L_h, rho, logit, p_constant, 
                                  eta, Lambda_star, y, ps);
-      // 3. Identify pivot for column h
+      // 4. Identify pivot for column h
       int l_h = identify_pivot(h, Phi, Delta, p);
       pivots(h) = l_h;  
-      // 4. Update Delta for column h
+      // 5. Update Delta for column h
       update_delta_column(h, l_h, Phi, Delta);
-      // 5. Recompute membership after Delta update
+      // 6. Recompute membership after Delta update
       arma::vec in_L_h_updated = compute_L_membership_single(h, Delta, p);
       arma::vec not_in_L_h = arma::ones(p) - in_L_h_updated;
-      // 6. Update remaining positions
+      // 7. Update remaining positions
       update_phi_remaining_single(h, Phi, not_in_L_h, l_h, rho, logit, p_constant, 
-                         eta, Lambda_star, y, ps, Delta, cMH);
-}
+                         eta, Lambda_star, y, ps, Delta, cMH, order_dependent);
+   }
+
 
     // -------------------------------------------------------------------------
     // Update Lambda_star and Lambda
@@ -889,4 +918,5 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   out["accRate"] = ACC_RATE;
   
   return out;
+
 }
