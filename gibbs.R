@@ -5,7 +5,7 @@ sourceCpp("Cwrapper.cpp")
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
                            b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
                           b_theta, sd_gammaB, scale_factor_MH, cMH, kinit = NULL, 
-                          kmax = NULL){
+                          kmax = NULL, order_dependent = FALSE){
   set.seed(mseed)
   p = dim(y)[2]
   n = dim(y)[1]
@@ -76,7 +76,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
                    y, wB, burn, nrun, thin, start_adapt, kmax, 
                    eta, GammaB, Lambda,
                    Lambda_star, d, kstar, logit, rho, Phi, Plam, pred, ps, v, w, 
-                   out, verbose, uu, prob, sp, lpiv, Delta, scale_factor_MH, cMH)
+                   out, verbose, uu, prob, sp, lpiv, Delta, scale_factor_MH, cMH, order_dependent)
   # -------------------------------------------------------------------------- #
   if ("sigmacol" %in% output) out[["sigmacol"]] <- lapply(out[["sigmacol"]], c)
   out[["numFactors"]] <- c(out[["numFactors"]])
@@ -90,3 +90,4 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   
   return(out)
 }
+
