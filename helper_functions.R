@@ -34,6 +34,151 @@ simulate_block_mvn <- function(n, p, n_blocks, within_cor, between_cor, variance
   return(list(data = Y, Sigma = Sigma1, xlab = xlab))
 }
 
+# new
+simulate_factor_cov_block <- function(p,
+                                      K,
+                                      n_blocks = 3,
+                                      block_sizes = NULL,      # length n_blocks; defaults to equal split of p
+                                      K_block = NULL,          # length n_blocks; defaults to split K across blocks
+                                      loading_sd = 1,
+                                      psi = NULL,              # NULL -> no diagonal; scalar or length p vector allowed
+                                      cross_block_sd = 0,      # >0 gives small cross-block loadings
+                                      seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  
+  # block sizes over variables
+  if (is.null(block_sizes)) {
+    base <- p %/% n_blocks
+    rem  <- p %% n_blocks
+    block_sizes <- rep(base, n_blocks)
+    if (rem > 0) block_sizes[seq_len(rem)] <- block_sizes[seq_len(rem)] + 1
+  }
+  stopifnot(sum(block_sizes) == p)
+  
+  # factors per block
+  if (is.null(K_block)) {
+    base <- K %/% n_blocks
+    rem  <- K %% n_blocks
+    K_block <- rep(base, n_blocks)
+    if (rem > 0) K_block[seq_len(rem)] <- K_block[seq_len(rem)] + 1
+  }
+  stopifnot(sum(K_block) == K)
+  
+  # variable indices by block
+  idx_blocks <- split(seq_len(p), rep(seq_len(n_blocks), times = block_sizes))
+  
+  # factor indices by block
+  fac_blocks <- split(seq_len(K), rep(seq_len(n_blocks), times = K_block))
+  
+  # build Lambda (p x K)
+  Lambda <- matrix(0, nrow = p, ncol = K)
+  
+  for (b in seq_len(n_blocks)) {
+    rows <- idx_blocks[[b]]
+    cols <- fac_blocks[[b]]
+    
+    # main within-block loadings
+    Lambda[rows, cols] <- matrix(
+      rnorm(length(rows) * length(cols), mean = 0, sd = loading_sd),
+      nrow = length(rows), ncol = length(cols)
+    )
+    
+    # optional small cross-block loadings (adds weak correlation across blocks)
+    if (cross_block_sd > 0) {
+      other_cols <- setdiff(seq_len(K), cols)
+      if (length(other_cols) > 0) {
+        Lambda[rows, other_cols] <- matrix(
+          rnorm(length(rows) * length(other_cols), mean = 0, sd = cross_block_sd),
+          nrow = length(rows), ncol = length(other_cols)
+        )
+      }
+    }
+  }
+  
+  # covariance from factor part
+  Sigma <- Lambda %*% t(Lambda)
+  
+  # optional diagonal noise Psi
+  if (!is.null(psi)) {
+    if (length(psi) == 1) psi <- rep(psi, p)
+    stopifnot(length(psi) == p)
+    Sigma <- Sigma + diag(psi)
+  }
+  
+  # --- categorical block label ---
+  xlab <- factor(rep(seq_len(n_blocks), times = block_sizes))
+  
+  list(
+    Sigma = Sigma,
+    Lambda = Lambda,
+    xlab = xlab,
+    block_sizes = block_sizes,
+    K_block = K_block
+  )
+}
+
+
+simulate_factor_block_with_cross <- function(p,
+                                             block_sizes,
+                                             block_rho,
+                                             cross_rho = 0.1,
+                                             diag_var = 1,
+                                             loading_noise_sd = 0,
+                                             psi_jitter_sd = 0,
+                                             seed = NULL) {
+  
+  if (!is.null(seed)) set.seed(seed)
+  
+  n_blocks <- length(block_sizes)
+  stopifnot(sum(block_sizes) == p)
+  stopifnot(length(block_rho) == n_blocks)
+  stopifnot(cross_rho < min(block_rho))
+  
+  # One factor per block + 1 global factor
+  K <- n_blocks + 1
+  Lambda <- matrix(0, nrow = p, ncol = K)
+  
+  # ---- xlab (block membership for variables) ----
+  xlab <- factor(rep(seq_len(n_blocks), times = block_sizes))
+  
+  # Global loading controls cross-block correlation
+  l_global <- sqrt(cross_rho)
+  
+  # Block-specific loadings
+  l_block <- sqrt(pmax(block_rho - cross_rho, 0))
+  
+  for (b in seq_len(n_blocks)) {
+    rows <- which(xlab == b)
+    
+    # block factor
+    Lambda[rows, b] <- l_block[b] +
+      rnorm(length(rows), 0, loading_noise_sd)
+    
+    # global factor (last column)
+    Lambda[rows, K] <- l_global +
+      rnorm(length(rows), 0, loading_noise_sd)
+  }
+  
+  Sigma_factor <- Lambda %*% t(Lambda)
+  
+  psi <- diag_var - rowSums(Lambda^2)
+  psi <- pmax(psi, 1e-8)
+  
+  if (psi_jitter_sd > 0) {
+    psi <- pmax(psi + rnorm(p, 0, psi_jitter_sd), 1e-8)
+  }
+  
+  Sigma <- Sigma_factor + diag(psi)
+  
+  list(
+    Sigma = Sigma,
+    Lambda = Lambda,
+    psi = psi,
+    xlab = xlab,
+    block_sizes = block_sizes
+  )
+}
+
 reorder_blocks <- function(Sigma, Y, block_membership, new_block_order) {
   p <- ncol(Y)
   n_blocks <- length(unique(block_membership))

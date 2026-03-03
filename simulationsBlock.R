@@ -15,7 +15,7 @@ n = 50
 p = 30
 mseed = 435
 data_synt = simulate_block_mvn(n, p, n_blocks = 3, within_cor = c(0.4, 0.9, 0.6),
-                                between_cor = 0,variances = 1, mseed)
+                               between_cor = 0,variances = 1, mseed)
 
 Y = data_synt$data
 covariate = model.matrix(~data_synt$xlab) # X matrix
@@ -76,13 +76,13 @@ pp1 = pheatmap(Lambda_mean, treeheight_row = 0, treeheight_col = 0, cluster_rows
 #-------------# reorder blocks #---------#
 
 data_reordered = reorder_blocks(Sigma = data_synt$Sigma, Y = Y,
-                            block_membership = data_synt$xlab,
-                            new_block_order = c(3, 1, 2))
+                                block_membership = data_synt$xlab,
+                                new_block_order = c(3, 1, 2))
 Yr = data_reordered$Y
 covariater = model.matrix(~data_reordered$xlab) # X matrix
 fit_r = gibbs_adaptive(Yr, covariater, nrun, burn, thin, mseed, verbose = T, p_constant,
-                     b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
-                     b_theta, sd_gammaB, scale_factor_MH, cMH)
+                       b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
+                       b_theta, sd_gammaB, scale_factor_MH, cMH)
 
 #--# Covariance 
 Lambda_outerr = lapply(fit_r$lambda, function(A) A %*% t(A))
@@ -90,14 +90,14 @@ cov_meanr = apply(simplify2array(Lambda_outerr), c(1, 2), mean)
 
 
 pr3 = pheatmap(data_reordered$Sigma, cluster_rows = F, cluster_cols = F, 
-              border_color ="NA",   main = "True covariance- reordered",
-              breaks = seq(0, max_val, length.out = 100),
-              color = colorRampPalette(c("white","yellow2", "orange","darkred"))(100))
+               border_color ="NA",   main = "True covariance- reordered",
+               breaks = seq(0, max_val, length.out = 100),
+               color = colorRampPalette(c("white","yellow2", "orange","darkred"))(100))
 pr1 = pheatmap(cov_meanr, treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
-              cluster_cols = F, border_color ="NA", legend=T,
-              main = "Posterior covariance-reordered",
-              breaks = seq(0, max_val, length.out = 100),
-              color = colorRampPalette(c("white","yellow2", "orange","darkred"))(100))
+               cluster_cols = F, border_color ="NA", legend=T,
+               main = "Posterior covariance-reordered",
+               breaks = seq(0, max_val, length.out = 100),
+               color = colorRampPalette(c("white","yellow2", "orange","darkred"))(100))
 
 prblock3 = grid.arrange(pr3[[4]], pr1[[4]], nrow = 1)
 # ggsave("reordere_heatmaps.pdf", prblock3, width = 12, height = 6)
@@ -108,8 +108,7 @@ ppLambdar = identify_lambda(fit_r, p)
 Lambda_meanr = apply(simplify2array(ppLambdar$lambda), c(1, 2), mean)
 
 ppr1 = pheatmap(Lambda_mean, treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
-               cluster_cols = F, border_color ="NA", legend=T,
-               main="Lambda",
-               breaks = seq(min(Lambda_mean), max(Lambda_mean), length.out = 100),
-               color = colorRampPalette(c("white","gold2", "orange","darkred"))(100))
-
+                cluster_cols = F, border_color ="NA", legend=T,
+                main="Lambda",
+                breaks = seq(min(Lambda_mean), max(Lambda_mean), length.out = 100),
+                color = colorRampPalette(c("white","gold2", "orange","darkred"))(100))

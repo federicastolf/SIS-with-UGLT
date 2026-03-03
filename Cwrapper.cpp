@@ -448,7 +448,7 @@ void update_phi_remaining_single(int h, arma::mat& Phi, const arma::vec& not_in_
   arma::vec varpi(p);
   for (j = 0; j < p; j++) {
     if (not_in_L_h(j) == 1) {
-      if(order_dependence == TRUE) {
+      if(order_dependent == TRUE) {
             varpi(j) = 1.0;
           } else {
             varpi(j) = calculate_varpi(j, h, Delta, logit, p_constant);
@@ -752,8 +752,9 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
         }
         double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
     } else {
-        double acceptance_rate = 1.0;
+        double acceptance_rate = 1;
     }
+    double acceptance_rate = 1;
 
     // -------------------------------------------------------------------------
     // Update Phi 
@@ -771,7 +772,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
 
       // 2. Fill prior probability of phi 
       
-       if(order_dependence == TRUE) {
+       if(order_dependent == TRUE) {
     	    int m = p - k + 1;
           int l = 0; // counter for active entries seen so far
         
