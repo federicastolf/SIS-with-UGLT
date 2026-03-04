@@ -24,7 +24,7 @@ b_sigma = 1
 a_theta = 1
 b_theta = 1
 sd_gammaB = 1 
-p_constant = 0.5
+p_constant = 0.8
 scale_factor_MH = 1
 cMH = 0.001
 
