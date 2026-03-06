@@ -156,26 +156,27 @@ library(geoR)
 
 ?varcov.spatial
 
+nyear = 4
 
-p = 36
+p = nyear*12
 n = 50
 mseed = 435
 
 # monthly seasonality
-month_cov = simulate_factor_block_with_cross(p = p, block_sizes = rep(3,12),
+month_cov = simulate_factor_block_with_cross(p = p, block_sizes = rep(4,12),
                                  block_rho = runif(12, 0.5,0.9),
                                  cross_rho = 0.1, loading_noise_sd = 0.1, 
-                                 seed = mseed, diag_var = 2)$Sigma
+                                 seed = mseed, diag_var = 1)$Sigma
 
-month_cov = month_cov[c(seq(1,36,3),seq(2,36,3),seq(3,36,3) ),
-          c(seq(1,36,3),seq(2,36,3),seq(3,36,3) )]
+month_cov = month_cov[c(seq(1,p,nyear),seq(2,p,nyear),seq(3,p,nyear), seq(4,p,nyear) ),
+          c(seq(1,p,nyear),seq(2,p,nyear),seq(3,p,nyear), seq(4,p,nyear) )]
 
 # timepoint
 t = seq(1, p)
 
 # matern covariance structure
 temp_cov = varcov.spatial(coords = cbind(t,t), cov.model = "matern",
-                     cov.pars = c(2, 10))$varcov
+                     cov.pars = c(1, 5))$varcov
 pheatmap(temp_cov, cluster_rows = F, cluster_cols = F, 
          border_color ="NA",   main = "True covariance")
 
@@ -186,16 +187,16 @@ corrplot::corrplot(cov2cor(cor(Y)))
 
 
 covariate = model.matrix( ~ ., 
-                          data = data.frame(t, as.factor(rep(1:3, each = 12)),
-                         as.factor(rep(1:12, 3))) )
+                          data = data.frame(scale(t), #as.factor(rep(1:nyear, each = 12)),
+                         as.factor(rep(1:12, nyear))) )
 
 
 #--- model non order-dependent
-p_constant = 0.8
-#b_theta = 5
-#a_sigma = 5
-alpha = 10
-fit = gibbs_adaptive(Y, cbind(1,scale(t), ), #as.matrix(rep(1,p)),
+p_constant = 0.05
+b_theta = 1
+a_sigma = 25
+alpha = 30
+fit = gibbs_adaptive(Y, covariate,
                      nrun, burn, thin, mseed, verbose = T, p_constant,
                      b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
                      b_theta, sd_gammaB, scale_factor_MH, cMH, order_dependent = F)
@@ -205,22 +206,12 @@ Lambda_outer <- mapply(function(A, s) {A %*% t(A) + diag(1/s)},
 cov_mean = apply(simplify2array(Lambda_outer), c(1, 2), mean)
 
 p3 = pheatmap(cov2cor(Sigma), cluster_rows = F, cluster_cols = F, 
-              border_color ="NA",   main = "True covariance", colorRampPalette(c("white","grey", "grey10"))(100))
+              border_color ="NA",   main = "True covariance", colorRampPalette(c("white","grey50", "grey10"))(100))
 p1 = pheatmap(cov2cor(cov_mean), treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
               cluster_cols = F, border_color ="NA", legend=T,
-              main = "No order", colorRampPalette(c("white","grey", "grey10"))(100))
+              main = "Posterior covariance", colorRampPalette(c("white","grey40", "grey1"))(100))
 
 
-#--- model order-dependent
-fit2 = gibbs_adaptive(Y, cbind(1,scale(t)), nrun, burn, thin, mseed, verbose = T, p_constant,
-                      b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
-                      b_theta, sd_gammaB, scale_factor_MH, cMH, order_dependent = T)
+grid.arrange(p3[[4]], p1[[4]], nrow = 1)
 
-Lambda_outer2 <- mapply(function(A, s) {A %*% t(A) + diag(1/s)},
-                        fit2$lambda, fit2$sigmacol, SIMPLIFY = FALSE)
-cov_mean2 = apply(simplify2array(Lambda_outer2), c(1, 2), mean)
-p2 = pheatmap(cov2cor(cov_mean2), treeheight_row = 0, treeheight_col = 0, cluster_rows = F,
-              cluster_cols = F, border_color ="NA", legend=T,
-              main = "Order dependent", colorRampPalette(c("white","grey", "grey10"))(100))
-# correlation matrix
-pblock3 = grid.arrange(p3[[4]], p1[[4]], p2[[4]], nrow = 1)
+
