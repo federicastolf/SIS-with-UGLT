@@ -112,3 +112,4 @@ ppr1 = pheatmap(Lambda_mean, treeheight_row = 0, treeheight_col = 0, cluster_row
                 main="Lambda",
                 breaks = seq(min(Lambda_mean), max(Lambda_mean), length.out = 100),
                 color = colorRampPalette(c("white","gold2", "orange","darkred"))(100))
+
