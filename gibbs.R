@@ -17,7 +17,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
     kinit = min(floor(log(p)*6), p)
   }
   k = kinit # number of factors to start with (active and inactive)
-  kstar = k - 1 # number of active factors
+  kstar = k # number of active factors
   sp = floor((nrun - burn) / thin) # number of posterior samples
   # adaptive probability
   prob = 1 / exp(b0 + b1 * seq(1, nrun))
@@ -41,22 +41,35 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # Initialize the precision matrix of lambda star
   Plam = diag(rgamma(k, a_theta, b_theta))
   # Compute Lambda (pxk)
-  Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
+  
+  Lambda = Lambda_star * Delta * matrix(rho, nrow=p, ncol=k, byrow=TRUE)
+  ### OLD
+  #Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
   
   # pivots
   Lcal = c(1:p) # set of all possible values for l
   lpiv = sample(Lcal, k, replace = F) # pivots vector
-  Delta = matrix(0, p, k) # sparsity matrix
+  
+  Delta = matrix(0, p, k)
   for(i in 1:k){
-    Delta[c(1:(lpiv[i]-1)),i] = 0
-    Delta[lpiv[i],i] = 1
+    l_h = lpiv[i]
+    for(j in l_h:p){
+      Delta[j, i] = Phi[j, i]
+    }
+    Delta[l_h, i] = 1  # force pivot to 1
   }
+  ### OLD
+  #Delta = matrix(0, p, k) # sparsity matrix
+  #for(i in 1:k){
+  #  Delta[c(1:(lpiv[i]-1)),i] = 0
+  #  Delta[lpiv[i],i] = 1
+  #}
   
   # Allocate output object memory
   output = c("gamma",      # shrinkCoefSamples    : qBxk
              "eta",         # etaval               : nxk
              "lambda",      # loadSamples          : pxk
-             "sigmacol",     # sigmacol (1/sigma^2) : p
+             "preccol",     # preccol (1/sigma^2) : p
              "activeFactors"     # rho : k
   )
   
@@ -64,7 +77,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   if("gamma" %in% output) out["gamma"] = NA
   if("eta" %in% output) out["eta"] = NA
   if("lambda" %in% output) out["lambda"] = NA
-  if("sigmacol" %in% output) out["sigmacol"] = NA 
+  if("preccol" %in% output) out["preccol"] = NA
   if("activeFactors" %in% output) out["activeFactors"] = NA 
   
   # start time
@@ -78,7 +91,8 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
                    Lambda_star, d, kstar, logit, rho, Phi, Plam, pred, ps, v, w, 
                    out, verbose, uu, prob, sp, lpiv, Delta, scale_factor_MH, cMH, order_dependent)
   # -------------------------------------------------------------------------- #
-  if ("sigmacol" %in% output) out[["sigmacol"]] <- lapply(out[["sigmacol"]], c)
+  
+  if ("preccol" %in% output) out[["preccol"]] <- lapply(out[["preccol"]], c)
   out[["numFactors"]] <- c(out[["numFactors"]])
   out[["time"]] <- (proc.time() - t0)[1]
   out[["y"]] <- y                 # data                       : nxp

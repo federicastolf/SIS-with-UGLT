@@ -754,7 +754,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     } else {
         double acceptance_rate = 1;
     }
-    double acceptance_rate = 1;
+    //double acceptance_rate = 1;
 
     // -------------------------------------------------------------------------
     // Update Phi 
@@ -839,7 +839,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       if(out.containsElementNamed("gamma")) { GAMMA[ind] = Gamma; }
       if(out.containsElementNamed("eta")) { ETA[ind] = eta; }
       if(out.containsElementNamed("lambda")) { LAMBDA[ind] = Lambda; }
-      if(out.containsElementNamed("sigmacol")) { SIG[ind] = ps; }
+      if(out.containsElementNamed("preccol")) { SIG[ind] = ps; }
       if(out.containsElementNamed("numFactors")) { K[ind] = kstar; }
       if(out.containsElementNamed("activeFactors")) { RHO[ind] = rho; }
       DELTA[ind] = Delta;
@@ -912,7 +912,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   if(out.containsElementNamed("gamma")) { out["gamma"] = GAMMA; }
   if(out.containsElementNamed("eta")) { out["eta"] = ETA; }
   if(out.containsElementNamed("lambda")) { out["lambda"] = LAMBDA; }
-  if(out.containsElementNamed("sigmacol")) { out["sigmacol"] = SIG; }
+  if(out.containsElementNamed("preccol")) { out["preccol"] = SIG; }
   if(out.containsElementNamed("numFactors")) { out["numFactors"] = K; }
   if(out.containsElementNamed("activeFactors")) { out["activeFactors"] = RHO; }
   out["delta"] = DELTA;
