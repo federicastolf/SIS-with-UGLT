@@ -728,6 +728,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
 
     // -------------------------------------------------------------------------
     // Update GammaB with Metropolis-Hastings
+    double acceptance_rate = 1;
     if( order_dependent == FALSE){
         pred = wB * Gamma;
         logit = arma::exp(pred) / (1 + arma::exp(pred));
@@ -751,9 +752,9 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
           if (accepted) accepted_this_iter++;
         }
         double acceptance_rate = static_cast<double>(accepted_this_iter) / k;
-    } else {
-        double acceptance_rate = 1;
-    }
+    } //else {
+      //  double acceptance_rate = 1;
+    //}
     //double acceptance_rate = 1;
 
     // -------------------------------------------------------------------------
