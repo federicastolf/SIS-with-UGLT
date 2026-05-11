@@ -42,10 +42,6 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   Plam = diag(rgamma(k, a_theta, b_theta))
   # Compute Lambda (pxk)
   
-  Lambda = Lambda_star * Delta * matrix(rho, nrow=p, ncol=k, byrow=TRUE)
-  ### OLD
-  #Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
-  
   # pivots
   Lcal = c(1:p) # set of all possible values for l
   lpiv = sample(Lcal, k, replace = F) # pivots vector
@@ -64,6 +60,10 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   #  Delta[c(1:(lpiv[i]-1)),i] = 0
   #  Delta[lpiv[i],i] = 1
   #}
+
+  Lambda = Lambda_star * Delta * matrix(rho, nrow=p, ncol=k, byrow=TRUE)
+  ### OLD
+  #Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
   
   # Allocate output object memory
   output = c("gamma",      # shrinkCoefSamples    : qBxk
