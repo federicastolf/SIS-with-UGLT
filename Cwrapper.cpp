@@ -94,6 +94,83 @@ double dmvnorm_log(const arma::vec& x, const arma::vec& mu, const arma::mat& Sig
   return log_dens;
 }
 
+
+//' Sample from a truncated normal distribution. Samples are drawn
+ //' componentwise, so each component of the vector is allowed its own
+ //' mean, standard deviation, and upper and lower limits. The components
+ //' are assumed to be independent.
+ //'
+ //' @param y_lower \code{n x p} matrix of lower endpoints
+ //' @param y_upper \code{n x p} matrix of upper endpoints
+ //' @param mu \code{n x p} matrix of conditional expectations
+ //' @param sigma \code{p x 1} vector of conditional standard deviations
+ //' @param u_rand \code{n x p} matrix of uniform random variables
+ //'
+ //' @return z_star \code{n x p} draw from the truncated normal distribution
+ //'
+ //' @note This function uses \code{Rcpp} for computational efficiency.
+ //'
+ // [[Rcpp::export]]
+ arma::mat truncnorm_lg(const arma::mat& y_lower, const arma::mat& y_upper,
+                        const arma::mat& mu, const arma::vec& sigma,
+                        const arma::mat& u_rand) {
+   // Dim of matrix:
+   int n = y_lower.n_rows;
+   int p = y_lower.n_cols;
+   // Storage:
+   double val = 0;
+   arma::mat z_star(n,p);
+   
+   for(int t = 0; t < n; ++t) {
+     for(int j = 0; j < p; ++j) {
+       // Control
+       double uptail1 = (y_lower(t,j) - mu(t,j)) * 1 / sigma(j) > 8;
+       double uptail2 = (y_upper(t,j) - mu(t,j)) * 1 / sigma(j) > 8;
+       // pnorm(q, mean = 0, sd = 1, lower.tail = TRUE, log.p = FALSE)
+       // true + false = 1, true + true = 2, false + false = 0
+       if((uptail1 + uptail2) == 0){
+         // Lower and upper limits, transformed via pnorm:
+         double F_lower = R::pnorm(y_lower(t,j), mu(t,j), sigma(j), 1, 0);
+         double F_upper = R::pnorm(y_upper(t,j), mu(t,j), sigma(j), 1, 0);
+         // replace 0 with 0.000001 and 1 with 0.999999
+         if (F_lower == 0) {
+           F_lower = 0.000001;
+         } else if (F_upper == 1) {
+           F_lower = 0.999999;
+         }
+         if (F_upper == 0) {
+           F_upper = 0.000001;
+         } else if (F_upper == 1) {
+           F_upper = 0.999999;
+         }
+         // Corresponding sampled value:
+         val = R::qnorm(F_lower + u_rand(t,j) * (F_upper - F_lower), mu(t,j), sigma(j), 1, 0);
+       }
+       else {
+         double F_lower = R::pnorm(y_lower(t,j), mu(t,j), sigma(j), 0, 0);
+         double F_upper = R::pnorm(y_upper(t,j), mu(t,j), sigma(j), 0, 0);
+         // replace 0 with 0.000001 and 1 with 0.999999
+         if (F_lower == 0) {
+           F_lower = 0.000001;
+         } else if (F_upper == 1) {
+           F_lower = 0.999999;
+         }
+         if (F_upper == 0) {
+           F_upper = 0.000001;
+         } else if (F_upper == 1) {
+           F_upper = 0.999999;
+         }
+         // Corresponding sampled value:
+         val = R::qnorm(F_lower + u_rand(t,j) * (F_upper - F_lower), mu(t,j), sigma(j), 0, 0);
+       }
+       z_star(t,j) = std::min(std::max(y_lower(t,j), val), y_upper(t,j));
+     }
+   }
+   return z_star;
+ }
+
+
+
 /* -------------------------------------------------------------------------- */
 // Functions in this file:
 //  - is_pivot_row
@@ -674,19 +751,14 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L,
 // Optimized Adaptive Gibbs Sampler - computes pivots once per iteration
 // [[Rcpp::export]]
 Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_theta, 
-  double b_theta, double sd_gammaB, double p_constant,
-  arma::mat y, 
-  arma::mat wB,
-  int burn, int nrun, int thin, int start_adapt, int kmax,
-  arma::mat eta, arma::mat Gamma, arma::mat Lambda, arma::mat Lambda_star, 
-  arma::vec d, int kstar,
-  arma::mat logit, arma::vec rho, arma::mat Phi, arma::mat Plam, 
-  arma::mat pred, arma::vec ps,
-  arma::vec v, arma::vec w,
-  Rcpp::List out, bool verbose,
-  arma::vec uu, arma::vec prob, int sp,
-  arma::vec pivots, arma::mat Delta, double scale_factor_MH, double cMH,
-  bool order_dependent) {
+  double b_theta, double sd_gammaB, double p_constant, arma::mat y, arma::mat wB,
+  int burn, int nrun, int thin, int start_adapt, int kmax, arma::mat eta, 
+  arma::mat Gamma, arma::mat Lambda, arma::mat Lambda_star, arma::vec d, 
+  int kstar, arma::mat logit, arma::vec rho, arma::mat Phi, arma::mat Plam, 
+  arma::mat pred, arma::vec ps, arma::vec v, arma::vec w, Rcpp::List out, 
+  bool verbose, arma::vec uu, arma::vec prob, int sp, arma::vec pivots, 
+  arma::mat Delta, double scale_factor_MH, double cMH, arma::mat a_y, 
+  arma::mat a_yp1, bool order_dependent, bool star) {
   
   // ---------------------------------------------------------------------------
   // output
@@ -715,13 +787,25 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       Rcout << it + 1 << " : " << kstar << " active factors\n";
     }
 
+    //--------------------------------------------------------------------------
+    arma::mat Zmean(n, p);
+    arma::mat Z(n, p);
+    if(star == TRUE){
+      Zmean = eta * trans(Lambda);
+      arma::mat n_unif = runif_mat(n, p, 0, 1);
+      Z = truncnorm_lg(log(a_y), log(a_yp1), Zmean, sqrt(1 / ps), n_unif);
+    }
+    else{
+      Z = y;
+    }
+    
     // -------------------------------------------------------------------------
     // Update eta
-    eta = update_eta(Lambda, ps, y);
+    eta = update_eta(Lambda, ps, Z);
     
     // -------------------------------------------------------------------------
     // Update Sigma
-    arma::mat Z_res = y - eta * trans(Lambda);
+    arma::mat Z_res = Z - eta * trans(Lambda);
     for (j = 0; j < p; j++) {
       ps(j) = R::rgamma(a_sigma + 0.5 * n, 1 / (b_sigma + 0.5 * arma::accu(arma::pow(Z_res.col(j), 2))));
     }
@@ -789,7 +873,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
 
       // 3. Update potential pivots
       update_phi_potential_pivots_single(h, Phi, in_L_h, rho, logit, p_constant, 
-                                 eta, Lambda_star, y, ps);
+                                 eta, Lambda_star, Z, ps);
       // 4. Identify pivot for column h
       int l_h = identify_pivot(h, Phi, Delta, p);
       pivots(h) = l_h;  
@@ -800,7 +884,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       arma::vec not_in_L_h = arma::ones(p) - in_L_h_updated;
       // 7. Update remaining positions
       update_phi_remaining_single(h, Phi, not_in_L_h, l_h, rho, logit, p_constant, 
-                         eta, Lambda_star, y, ps, Delta, cMH, order_dependent);
+                         eta, Lambda_star, Z, ps, Delta, cMH, order_dependent);
    }
 
 
@@ -808,14 +892,14 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     // Update Lambda_star and Lambda
     arma::mat etarho = trans(eta.each_row() % trans(rho));
     for (j = 0; j < p; j++) {
-      Lambda_star.row(j) = update_Lambda_star(j, etarho, Delta, Plam, ps, y);
+      Lambda_star.row(j) = update_Lambda_star(j, etarho, Delta, Plam, ps, Z);
     }
     Lambda = (Lambda_star.each_row() % trans(sqrt(rho))) % Delta;
     
     // -------------------------------------------------------------------------
     // Update d 
     for (h = 0; h < k; h++) {
-      d(h) = update_d(h, Delta, rho, eta, Lambda_star, y, ps, w);
+      d(h) = update_d(h, Delta, rho, eta, Lambda_star, Z, ps, w);
     }
     rho = arma::ones(k);
     rho.elem(find(d <= arma::linspace<arma::vec>(0, k - 1, k))) -= 1;

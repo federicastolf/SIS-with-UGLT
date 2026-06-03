@@ -15,7 +15,8 @@ n = 50
 p = 30
 mseed = 435
 data_synt = simulate_block_mvn(n, p, n_blocks = 3, within_cor = c(0.4, 0.9, 0.6),
-                               between_cor = 0,variances = 1, mseed)
+                               between_cor = 0, variances = 1, mseed, 
+                               count = T)
 
 Y = data_synt$data
 covariate = model.matrix(~data_synt$xlab) # X matrix
@@ -41,13 +42,15 @@ cMH = 0.001
 
 fit = gibbs_adaptive(Y, covariate, nrun, burn, thin, mseed, verbose = T, p_constant,
                      b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta,
-                     b_theta, sd_gammaB, scale_factor_MH, cMH)
+                     b_theta, sd_gammaB, scale_factor_MH, cMH,
+                     star = TRUE)
 
 # ---- Covariance ----
 Lambda_outer = lapply(fit$lambda, function(A) A %*% t(A))
 cov_mean = apply(simplify2array(Lambda_outer), c(1, 2), mean)
 
-max_val = max(data_synt$Sigma)
+# max_val = max(data_synt$Sigma)
+max_val = max(cov_mean)
 p3 = pheatmap(data_synt$Sigma, cluster_rows = F, cluster_cols = F, 
               border_color ="NA",   main = "True covariance",
               breaks = seq(0, max_val, length.out = 100),
@@ -62,6 +65,19 @@ p1 = pheatmap(cov_mean, treeheight_row = 0, treeheight_col = 0, cluster_rows = F
 pblock3 = grid.arrange(p3[[4]], p1[[4]], nrow = 1)
 # ggsave("combined_heatmaps.pdf", pblock3, width = 12, height = 6)
 
+# post_cor = cov2cor(cov_mean)
+# true_cor = cov2cor(data_synt$Sigma)
+# p3 = pheatmap(true_cor, cluster_rows=F, cluster_cols=F, border_color=NA,
+#               main="True correlation",
+#               breaks=seq(0,1,length.out=100),
+#               color=colorRampPalette(c("white","yellow2","orange","darkred"))(100))
+# p1 = pheatmap(post_cor, cluster_rows=F, cluster_cols=F, border_color=NA,
+#               main="Posterior correlation",
+#               breaks=seq(0,1,length.out=100),
+#               color=colorRampPalette(c("white","yellow2","orange","darkred"))(100))
+# grid.arrange(p3[[4]], p1[[4]], nrow=1)
+
+
 #---- Inference on loadings ----
 
 ppLambda = identify_lambda(fit, p)
@@ -71,7 +87,7 @@ pp1 = pheatmap(Lambda_mean, treeheight_row = 0, treeheight_col = 0, cluster_rows
                cluster_cols = F, border_color ="NA", legend=T,
                main="Lambda",
                breaks = seq(min(Lambda_mean), max(Lambda_mean), length.out = 100),
-               color = colorRampPalette(c("white","gold2", "orange","darkred"))(100))
+               color = colorRampPalette(c("white","gold2", "darkred"))(100))
 
 #-------------# reorder blocks #---------#
 

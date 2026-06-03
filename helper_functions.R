@@ -1,8 +1,8 @@
 library(MASS)
 
 # simulate data with block structure covariance
-simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances, 
-                               mseed) {
+simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances,
+                              mseed, count = FALSE, lambda = 5) {
   set.seed(mseed)
   block_size = p / n_blocks
   if (length(within_cor) == 1) {
@@ -10,7 +10,6 @@ simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances
   } else if (length(within_cor) != n_blocks) {
     stop("within_cor must be length 1 or n_blocks")
   }
-  
   Sigma = matrix(between_cor, p, p)
   for (i in 1:n_blocks) {
     start_idx = (i - 1) * block_size + 1
@@ -20,7 +19,20 @@ simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances
   }
   D = diag(rep(sqrt(variances), p))
   Sigma1 = D %*% Sigma %*% D
-  Y = mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
+  Z = mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
+  
+  if (count) {
+    # gaussian copula
+    if (length(lambda) == 1) lambda = rep(lambda, p)
+    if (length(lambda) != p) stop("lambda must be length 1 or p")
+    U = pnorm(Z)                       
+    Y = matrix(NA, nrow = n, ncol = p)
+    for (j in 1:p) {
+      Y[, j] = qpois(U[, j], lambda = lambda[j])  # marginal Poisson
+    }
+  } else {
+    Y = Z
+  }
   xlab = as.factor(rep(1:n_blocks, each = block_size))
   return(list(data = Y, Sigma = Sigma1, xlab = xlab))
 }

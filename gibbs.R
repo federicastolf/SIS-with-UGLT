@@ -4,8 +4,9 @@ library(RcppArmadillo)
 sourceCpp("Cwrapper.cpp")
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
                            b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
-                          b_theta, sd_gammaB, scale_factor_MH, cMH, kinit = NULL, 
-                          kmax = NULL, order_dependent = FALSE){
+                          b_theta, sd_gammaB, scale_factor_MH, cMH, y_max = Inf,
+                          star = FALSE, kinit = NULL, kmax = NULL, 
+                          order_dependent = FALSE){
   set.seed(mseed)
   p = dim(y)[2]
   n = dim(y)[1]
@@ -22,6 +23,22 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # adaptive probability
   prob = 1 / exp(b0 + b1 * seq(1, nrun))
   uu = runif(nrun)
+  
+  # Transformation for the response
+  a_j = function(j, y_max) {
+    val = j
+    val[j == y_max + 1] = Inf
+    val
+  }
+  # Bounds for truncated normal
+  a_y = a_yp1=- matrix(NA, nrow = n, ncol = p)
+  for(j in 1:p) {
+    a_y[, j] = a_j(y[, j], y_max)        # a_y = a_j(y)
+    a_yp1[, j] = a_j(y[, j] + 1, y_max)  # a_yp1 = a_j(y + 1)
+  }
+  # Replace NA with 0/Inf in a_y/a_yp1
+  a_y[is.na(y)] = 0      # log(0)=-Inf
+  a_yp1[is.na(y)] = Inf  # log(Inf)=Inf
   
   #-----------# Initialization #-------------#
   ps = rgamma(p, a_sigma, b_sigma) # sigma^-2
@@ -54,16 +71,8 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
     }
     Delta[l_h, i] = 1  # force pivot to 1
   }
-  ### OLD
-  #Delta = matrix(0, p, k) # sparsity matrix
-  #for(i in 1:k){
-  #  Delta[c(1:(lpiv[i]-1)),i] = 0
-  #  Delta[lpiv[i],i] = 1
-  #}
 
   Lambda = Lambda_star * Delta * matrix(rho, nrow=p, ncol=k, byrow=TRUE)
-  ### OLD
-  #Lambda = t(t(Lambda_star) * sqrt(rho)) * sqrt(Phi)
   
   # Allocate output object memory
   output = c("gamma",      # shrinkCoefSamples    : qBxk
@@ -85,11 +94,11 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # -------------------------------------------------------------------------- #
   # ADAPTIVE GIBBS SAMPLING
   # -------------------------------------------------------------------------- #
-  out = Rcpp_gibbs(alpha, a_sigma, b_sigma, a_theta, b_theta, sd_gammaB, p_constant,
-                   y, wB, burn, nrun, thin, start_adapt, kmax, 
-                   eta, GammaB, Lambda,
-                   Lambda_star, d, kstar, logit, rho, Phi, Plam, pred, ps, v, w, 
-                   out, verbose, uu, prob, sp, lpiv, Delta, scale_factor_MH, cMH, order_dependent)
+  out = Rcpp_gibbs(alpha, a_sigma, b_sigma, a_theta, b_theta, sd_gammaB, 
+                   p_constant, y, wB, burn, nrun, thin, start_adapt, kmax,  eta,
+                   GammaB, Lambda, Lambda_star, d, kstar, logit, rho, Phi, Plam,
+                   pred, ps, v, w, out, verbose, uu, prob, sp, lpiv, Delta,
+                   scale_factor_MH, cMH, a_y, a_yp1, order_dependent, star)
   # -------------------------------------------------------------------------- #
   
   if ("preccol" %in% output) out[["preccol"]] <- lapply(out[["preccol"]], c)
