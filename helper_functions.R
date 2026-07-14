@@ -1,40 +1,43 @@
 library(MASS)
 
 # simulate data with block structure covariance
-simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances,
+simulate_block_mvn = function(n, p, n_blocks, within_cor, between_cor, variances = 1,
                               mseed, count = FALSE, lambda = 5) {
   set.seed(mseed)
   block_size = p / n_blocks
-  if (length(within_cor) == 1) {
-    within_cor = rep(within_cor, n_blocks)
-  } else if (length(within_cor) != n_blocks) {
-    stop("within_cor must be length 1 or n_blocks")
-  }
-  Sigma = matrix(between_cor, p, p)
+  
+  if (length(within_cor) == 1) within_cor = rep(within_cor, n_blocks)
+  if (length(within_cor) != n_blocks) stop("within_cor must be length 1 or n_blocks")
+  
+  if (length(variances) == 1) variances = rep(variances, p)
+  if (length(variances) != p) stop("variances must be length 1 or p")
+  
+  if (length(lambda) == 1) lambda = rep(lambda, p)
+  if (length(lambda) != p) stop("lambda must be length 1 or p")
+  
+  # matrice di correlazione a blocchi
+  R = matrix(between_cor, p, p)
   for (i in 1:n_blocks) {
-    start_idx = (i - 1) * block_size + 1
-    end_idx = i * block_size
-    Sigma[start_idx:end_idx, start_idx:end_idx] = within_cor[i]
-    diag(Sigma[start_idx:end_idx, start_idx:end_idx]) = 1
+    idx = ((i - 1) * block_size + 1):(i * block_size)
+    R[idx, idx] = within_cor[i]
   }
-  D = diag(rep(sqrt(variances), p))
-  Sigma1 = D %*% Sigma %*% D
-  Z = mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
+  diag(R) = 1
+  
+  D = diag(sqrt(variances))
+  Sigma = D %*% R %*% D
+  
+  if (!is.null(mseed)) set.seed(mseed)
+  Z = MASS::mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
   
   if (count) {
-    # gaussian copula
-    if (length(lambda) == 1) lambda = rep(lambda, p)
-    if (length(lambda) != p) stop("lambda must be length 1 or p")
-    U = pnorm(Z)                       
-    Y = matrix(NA, nrow = n, ncol = p)
-    for (j in 1:p) {
-      Y[, j] = qpois(U[, j], lambda = lambda[j])  # marginal Poisson
-    }
+    sds = sqrt(variances)
+    U = pnorm(Z, mean = 0, sd = rep(sds, each = n))
+    Y = sapply(seq_len(p), function(j) qpois(U[, j], lambda = lambda[j]))
   } else {
     Y = Z
   }
   xlab = as.factor(rep(1:n_blocks, each = block_size))
-  return(list(data = Y, Sigma = Sigma1, xlab = xlab))
+  return(list(data = Y, Sigma = Sigma, xlab = xlab))
 }
 
 

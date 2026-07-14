@@ -1,12 +1,13 @@
 library(Rcpp)
 library(RcppArmadillo)
 
-sourceCpp("Cwrapper.cpp")
+sourceCpp("git/Cwrapper.cpp")
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
                            b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
                           b_theta, sd_gammaB, scale_factor_MH, cMH, y_max = Inf,
                           star = FALSE, kinit = NULL, kmax = NULL, 
-                          order_dependent = FALSE){
+                          order_dependent = FALSE, mu_mean0 = 0, mu_sd0 = 10,
+                          column_intercept = TRUE){
   set.seed(mseed)
   p = dim(y)[2]
   n = dim(y)[1]
@@ -41,6 +42,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   a_yp1[is.na(y)] = Inf  # log(Inf)=Inf
   
   #-----------# Initialization #-------------#
+  mu = rep(0, p)
   ps = rgamma(p, a_sigma, b_sigma) # sigma^-2
   Lambda_star = matrix(rnorm(p*k), nrow=p, ncol=k) # loading matrix
   eta = matrix(rnorm(n*k), nrow = n, ncol = k) # latent factors
@@ -81,6 +83,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
              "preccol",     # preccol (1/sigma^2) : p
              "activeFactors"     # rho : k
   )
+  if (star) output = c(output, "mu")
   
   out = list("numFactors" = NA)
   if("gamma" %in% output) out["gamma"] = NA
@@ -88,7 +91,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   if("lambda" %in% output) out["lambda"] = NA
   if("preccol" %in% output) out["preccol"] = NA
   if("activeFactors" %in% output) out["activeFactors"] = NA 
-  
+  if ("mu" %in% output) out["mu"] = NA
   # start time
   t0 = proc.time()
   # -------------------------------------------------------------------------- #
@@ -98,7 +101,8 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
                    p_constant, y, wB, burn, nrun, thin, start_adapt, kmax,  eta,
                    GammaB, Lambda, Lambda_star, d, kstar, logit, rho, Phi, Plam,
                    pred, ps, v, w, out, verbose, uu, prob, sp, lpiv, Delta,
-                   scale_factor_MH, cMH, a_y, a_yp1, order_dependent, star)
+                   scale_factor_MH, cMH, a_y, a_yp1, order_dependent, star,
+                   mu, mu_mean0, mu_sd0, column_intercept)
   # -------------------------------------------------------------------------- #
   
   if ("preccol" %in% output) out[["preccol"]] <- lapply(out[["preccol"]], c)
@@ -109,7 +113,9 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   out[["hyperparameters"]] <- list(alpha = alpha, a_theta = a_theta,
                                    b_theta = b_theta, 
                                    sd_gammaB = sd_gammaB, a_sigma = a_sigma, 
-                                   b_sigma = b_sigma, p_constant = p_constant)
+                                   b_sigma = b_sigma, p_constant = p_constant,
+                                   mu_mean0 = mu_mean0, mu_sd0 = mu_sd0,
+                                   column_intercept = column_intercept)
   
   return(out)
 }

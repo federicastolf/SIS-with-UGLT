@@ -751,14 +751,15 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L,
 // Optimized Adaptive Gibbs Sampler - computes pivots once per iteration
 // [[Rcpp::export]]
 Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_theta, 
-  double b_theta, double sd_gammaB, double p_constant, arma::mat y, arma::mat wB,
-  int burn, int nrun, int thin, int start_adapt, int kmax, arma::mat eta, 
-  arma::mat Gamma, arma::mat Lambda, arma::mat Lambda_star, arma::vec d, 
-  int kstar, arma::mat logit, arma::vec rho, arma::mat Phi, arma::mat Plam, 
-  arma::mat pred, arma::vec ps, arma::vec v, arma::vec w, Rcpp::List out, 
-  bool verbose, arma::vec uu, arma::vec prob, int sp, arma::vec pivots, 
-  arma::mat Delta, double scale_factor_MH, double cMH, arma::mat a_y, 
-  arma::mat a_yp1, bool order_dependent, bool star) {
+                      double b_theta, double sd_gammaB, double p_constant, arma::mat y, arma::mat wB,
+                      int burn, int nrun, int thin, int start_adapt, int kmax, arma::mat eta, 
+                      arma::mat Gamma, arma::mat Lambda, arma::mat Lambda_star, arma::vec d, 
+                      int kstar, arma::mat logit, arma::vec rho, arma::mat Phi, arma::mat Plam, 
+                      arma::mat pred, arma::vec ps, arma::vec v, arma::vec w, Rcpp::List out, 
+                      bool verbose, arma::vec uu, arma::vec prob, int sp, arma::vec pivots, 
+                      arma::mat Delta, double scale_factor_MH, double cMH, arma::mat a_y, 
+                      arma::mat a_yp1, bool order_dependent, bool star,
+                      arma::vec mu, double mu_mean0, double mu_sd0, bool column_intercept) {
   
   // ---------------------------------------------------------------------------
   // output
@@ -770,6 +771,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   Rcpp::List RHO(sp);
   arma::vec K(sp);
   arma::vec ACC_RATE(sp);
+  Rcpp::List MU(sp); 
   
   // ---------------------------------------------------------------------------
   // matrix dimensions
@@ -790,22 +792,25 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     //--------------------------------------------------------------------------
     arma::mat Zmean(n, p);
     arma::mat Z(n, p);
-    if(star == TRUE){
-      Zmean = eta * trans(Lambda);
+    arma::mat Z_c(n, p);   // Z centered on mu (Z - 1 * mu^T)
+    
+    if (star == TRUE) {
+      Zmean = arma::repmat(mu.t(), n, 1) + eta * trans(Lambda);
       arma::mat n_unif = runif_mat(n, p, 0, 1);
       Z = truncnorm_lg(log(a_y), log(a_yp1), Zmean, sqrt(1 / ps), n_unif);
-    }
-    else{
-      Z = y;
+      Z_c = Z.each_row() - mu.t();
+    } else {
+      Z   = y;
+      Z_c = Z;             // no intercept in the Gaussian case
     }
     
     // -------------------------------------------------------------------------
     // Update eta
-    eta = update_eta(Lambda, ps, Z);
+    eta = update_eta(Lambda, ps, Z_c);
     
     // -------------------------------------------------------------------------
     // Update Sigma
-    arma::mat Z_res = Z - eta * trans(Lambda);
+    arma::mat Z_res = Z_c - eta * trans(Lambda);
     for (j = 0; j < p; j++) {
       ps(j) = R::rgamma(a_sigma + 0.5 * n, 1 / (b_sigma + 0.5 * arma::accu(arma::pow(Z_res.col(j), 2))));
     }
@@ -873,7 +878,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
 
       // 3. Update potential pivots
       update_phi_potential_pivots_single(h, Phi, in_L_h, rho, logit, p_constant, 
-                                 eta, Lambda_star, Z, ps);
+                                 eta, Lambda_star, Z_c, ps);
       // 4. Identify pivot for column h
       int l_h = identify_pivot(h, Phi, Delta, p);
       pivots(h) = l_h;  
@@ -884,7 +889,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       arma::vec not_in_L_h = arma::ones(p) - in_L_h_updated;
       // 7. Update remaining positions
       update_phi_remaining_single(h, Phi, not_in_L_h, l_h, rho, logit, p_constant, 
-                         eta, Lambda_star, Z, ps, Delta, cMH, order_dependent);
+                         eta, Lambda_star, Z_c, ps, Delta, cMH, order_dependent);
    }
 
 
@@ -892,17 +897,48 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
     // Update Lambda_star and Lambda
     arma::mat etarho = trans(eta.each_row() % trans(rho));
     for (j = 0; j < p; j++) {
-      Lambda_star.row(j) = update_Lambda_star(j, etarho, Delta, Plam, ps, Z);
+      Lambda_star.row(j) = update_Lambda_star(j, etarho, Delta, Plam, ps, Z_c);
     }
     Lambda = (Lambda_star.each_row() % trans(sqrt(rho))) % Delta;
     
     // -------------------------------------------------------------------------
     // Update d 
     for (h = 0; h < k; h++) {
-      d(h) = update_d(h, Delta, rho, eta, Lambda_star, Z, ps, w);
+      d(h) = update_d(h, Delta, rho, eta, Lambda_star, Z_c, ps, w);
     }
     rho = arma::ones(k);
     rho.elem(find(d <= arma::linspace<arma::vec>(0, k - 1, k))) -= 1;
+    
+    // --- Update mu (intercept), only if star == TRUE
+    if (star == TRUE) {
+      double prec0 = 1.0 / (mu_sd0 * mu_sd0);
+      arma::mat resid = Z - eta * trans(Lambda);   // raw Z, not Z_c
+      
+      if (column_intercept == TRUE) {
+        // Column-specific intercept: mu_j indipendenti
+        for (j = 0; j < p; j++) {
+          double post_prec = prec0 + n * ps(j);
+          double post_var  = 1.0 / post_prec;
+          double post_mean = post_var *
+            (mu_mean0 * prec0 + ps(j) * arma::accu(resid.col(j)));
+          mu(j) = R::rnorm(post_mean, std::sqrt(post_var));
+        }
+      } else {
+        // Shared scalar intercept: un unico mu per tutte le colonne
+        double weighted_sum = 0.0;
+        double ps_sum = 0.0;
+        for (j = 0; j < p; j++) {
+          weighted_sum += ps(j) * arma::accu(resid.col(j));
+          ps_sum       += ps(j);
+        }
+        double post_prec = prec0 + n * ps_sum;
+        double post_var  = 1.0 / post_prec;
+        double post_mean = post_var * (mu_mean0 * prec0 + weighted_sum);
+        double mu_shared = R::rnorm(post_mean, std::sqrt(post_var));
+        mu.fill(mu_shared);       // replica sullo stesso vettore lungo p
+      }
+    }
+    
     
     // Update Plam
     arma::vec Plam_diag(k);
@@ -927,6 +963,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
       if(out.containsElementNamed("preccol")) { SIG[ind] = ps; }
       if(out.containsElementNamed("numFactors")) { K[ind] = kstar; }
       if(out.containsElementNamed("activeFactors")) { RHO[ind] = rho; }
+      if (star == TRUE && out.containsElementNamed("mu")) { MU[ind] = mu; }
       DELTA[ind] = Delta;
       ACC_RATE[ind] = acceptance_rate;
       ind += 1;
@@ -1000,6 +1037,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
   if(out.containsElementNamed("preccol")) { out["preccol"] = SIG; }
   if(out.containsElementNamed("numFactors")) { out["numFactors"] = K; }
   if(out.containsElementNamed("activeFactors")) { out["activeFactors"] = RHO; }
+  if (star == TRUE && out.containsElementNamed("mu")) { out["mu"] = MU; }
   out["delta"] = DELTA;
   out["accRate"] = ACC_RATE;
   
