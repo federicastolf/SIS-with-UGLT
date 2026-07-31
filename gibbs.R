@@ -2,9 +2,10 @@ library(Rcpp)
 library(RcppArmadillo)
 
 sourceCpp("git/Cwrapper.cpp")
+#sourceCpp("Cwrapper.cpp")
 gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant, 
                            b0, b1, start_adapt, alpha, a_sigma, b_sigma, a_theta, 
-                          b_theta, sd_gammaB, scale_factor_MH, cMH, y_max = Inf,
+                          b_theta, Sigma_gamma, scale_factor_MH, cMH, y_max = Inf,
                           star = FALSE, kinit = NULL, kmax = NULL, 
                           order_dependent = FALSE, mu_mean0 = 0, mu_sd0 = 10,
                           column_intercept = TRUE){
@@ -97,7 +98,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   # -------------------------------------------------------------------------- #
   # ADAPTIVE GIBBS SAMPLING
   # -------------------------------------------------------------------------- #
-  out = Rcpp_gibbs(alpha, a_sigma, b_sigma, a_theta, b_theta, sd_gammaB, 
+  out = Rcpp_gibbs(alpha, a_sigma, b_sigma, a_theta, b_theta, Sigma_gamma, 
                    p_constant, y, wB, burn, nrun, thin, start_adapt, kmax,  eta,
                    GammaB, Lambda, Lambda_star, d, kstar, logit, rho, Phi, Plam,
                    pred, ps, v, w, out, verbose, uu, prob, sp, lpiv, Delta,
@@ -112,7 +113,7 @@ gibbs_adaptive = function(y, wB, nrun, burn, thin, mseed, verbose, p_constant,
   out[["wB"]]  <- wB              # biological meta-covariates : pxqB
   out[["hyperparameters"]] <- list(alpha = alpha, a_theta = a_theta,
                                    b_theta = b_theta, 
-                                   sd_gammaB = sd_gammaB, a_sigma = a_sigma, 
+                                   Sigma_gamma = Sigma_gamma, a_sigma = a_sigma, 
                                    b_sigma = b_sigma, p_constant = p_constant,
                                    mu_mean0 = mu_mean0, mu_sd0 = mu_sd0,
                                    column_intercept = column_intercept)

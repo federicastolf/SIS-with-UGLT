@@ -58,17 +58,21 @@ reorder_blocks <- function(Sigma, Y, block_membership, new_block_order) {
 }
 
 
-identify_lambda <- function(fit, p, nsample = NULL, 
+identify_lambda_eta <- function(fit, p, nsample = NULL, 
                             return_delta = TRUE,
+                            return_eta = TRUE,
                             return_pivot_info = FALSE) {
   if (is.null(nsample)) {
     nsample <- length(fit$lambda)
   }
   
   # Initialize lists
+  n = nrow(fit$eta[[1]])
   lambda_ordered <- list()
+  eta_ordered <- list()
   delta_ordered <- list()
   pivot_location <- list()
+  to_keep = rep(0, nsample)
   c <- 0
   
   # Step 1: Filter and order samples based on 3579 rule
@@ -77,6 +81,8 @@ identify_lambda <- function(fit, p, nsample = NULL,
                     nrow = p)
     lambda <- matrix(fit$lambda[[i]][, c(fit$activeFactors[[i]] == TRUE)],
                      nrow = p)
+    eta <- matrix(fit$eta[[i]][, c(fit$activeFactors[[i]] == TRUE)],
+                     nrow = n)
     
     # Check if zero columns are present (not identifiable)
     if (sum(colSums(delta) == 0) == 0) {
@@ -89,10 +95,12 @@ identify_lambda <- function(fit, p, nsample = NULL,
         c <- c + 1
         
         # Order pivots decreasing and sign switch when needed
-        neword <- reorder_and_sign_swap(delta, lambda)
+        neword <- reorder_and_sign_swap(delta, lambda, eta)
         lambda_ordered[[c]] <- neword$lambda
         delta_ordered[[c]] <- neword$delta
+        eta_ordered[[c]] <- neword$eta
         pivot_location[[c]] <- neword$pivot_location
+        to_keep[i] = 1
       }
     }
   }
@@ -105,13 +113,18 @@ identify_lambda <- function(fit, p, nsample = NULL,
   c <- 0
   lambda_identified <- list()
   delta_identified <- list()
-  
+  eta_identified <- list()
+  id_tmp = which(to_keep>0)
+  sample_index = NULL
+
   for (i in 1:length(lambda_ordered)) {
     if (length(pivot_location[[i]]) == modal_rank) {
       if (all(pivot_location[[i]] == modal_config$mode)) {
         c <- c + 1
         lambda_identified[[c]] <- lambda_ordered[[i]]
         delta_identified[[c]] <- delta_ordered[[i]]
+        eta_identified[[c]] <- eta_ordered[[i]]
+        sample_index = c(sample_index, id_tmp[i])
       }
     }
   }
@@ -121,11 +134,16 @@ identify_lambda <- function(fit, p, nsample = NULL,
     lambda = lambda_identified,
     modal_config = modal_config$mode,
     modal_rank = modal_rank,
-    n_identified = length(lambda_identified)
+    n_identified = length(lambda_identified),
+    sample_index = sample_index
   )
   
   if (return_delta) {
     result$delta <- delta_identified
+  }
+  
+  if (return_eta) {
+    result$eta <- eta_identified
   }
   
   if (return_pivot_info) {
@@ -139,7 +157,7 @@ identify_lambda <- function(fit, p, nsample = NULL,
 
 
 # function to reorder and sign swap based on delta and lambda
-reorder_and_sign_swap <- function(delta, lambda) {
+reorder_and_sign_swap <- function(delta, lambda, eta) {
   # Ensure both have same dimensions
   if (!all(dim(delta) == dim(lambda))) {
     stop("delta and lambda must have the same dimensions")
@@ -169,16 +187,19 @@ reorder_and_sign_swap <- function(delta, lambda) {
   # Apply the order
   delta_new <- delta[, order_idx, drop = FALSE]
   lambda_new <- lambda[, order_idx, drop = FALSE]
+  eta_new <- eta[, order_idx, drop = FALSE]
   pivot_sign <- pivot_sign[order_idx]
   
   # Flip sign where needed
   for (h in seq_len(k)) {
     if (pivot_sign[h] < 0) {
       lambda_new[, h] <- -lambda_new[, h]
+      eta_new[, h] <- -eta_new[, h]
     }
   }
   
-  list(delta = delta_new, lambda = lambda_new, order = order_idx,
+  list(delta = delta_new, lambda = lambda_new, eta = eta_new,
+       order = order_idx,
        pivot_location = pivot_pos_sorted)
 }
 
@@ -202,3 +223,31 @@ find_modal_vector <- function(pivot_list) {
   
   list(mode = modal_vec, count = max(freq), freq_table = freq)
 }
+
+
+# Create pairly negative correlated beta covariance
+# rho < 0: negative correlation
+# rho > -1/(q-1) for positive definiteness
+make_beta_cov <- function(sd_beta, rho) {
+  q <- length(sd_beta)
+  
+  if (q > 1L && (rho <= -1 / (q - 1) || rho >= 1)) {
+    stop("rho must satisfy -1/(q-1) < rho < 1")
+  }
+  
+  R <- matrix(rho, q, q)
+  diag(R) <- 1
+  
+  D <- diag(sd_beta, q)
+  Sigma_beta <- D %*% R %*% D
+  
+  if (min(eigen(Sigma_beta, symmetric = TRUE,
+                only.values = TRUE)$values) <= 0) {
+    stop("Sigma_beta is not positive definite")
+  }
+  
+  Sigma_beta
+}
+# Example
+# q = 3 # number meta-covariate.rho <0 and rho> -1/(3-1) -> rho>-0.5 
+# Sigma_gamma = make_beta_cov(sd_beta = rep(1,3), rho = -1/2+0.01)

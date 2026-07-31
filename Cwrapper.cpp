@@ -751,7 +751,7 @@ bool sample_gamma_MH(int h, arma::mat& Gamma, const arma::mat& Phi_L,
 // Optimized Adaptive Gibbs Sampler - computes pivots once per iteration
 // [[Rcpp::export]]
 Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_theta, 
-                      double b_theta, double sd_gammaB, double p_constant, arma::mat y, arma::mat wB,
+                      double b_theta, arma::mat Sigma_gamma, double p_constant, arma::mat y, arma::mat wB,
                       int burn, int nrun, int thin, int start_adapt, int kmax, arma::mat eta, 
                       arma::mat Gamma, arma::mat Lambda, arma::mat Lambda_star, arma::vec d, 
                       int kstar, arma::mat logit, arma::vec rho, arma::mat Phi, arma::mat Plam, 
@@ -833,7 +833,7 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
         Phi_L.elem(Phi0.elem(arma::find(which_zero))) -= 1;
         
         // Metropolis-Hastings update for GammaB
-        arma::mat Bh_1 = arma::diagmat(arma::ones(qB) / pow(sd_gammaB, 2));
+        arma::mat Bh_1 = arma::inv_sympd(Sigma_gamma);
         int accepted_this_iter = 0;
         for (h = 0; h < k; h++) {
           bool accepted = sample_gamma_MH(h, Gamma, Phi_L, Phi, in_L, Delta, wB, Bh_1, 
@@ -995,7 +995,10 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
             }
         rho = join_elem(rho.elem(active), 1);
         Lambda = arma::join_rows(Lambda.cols(active), Lambda_star.col(k - 1) % Delta.col(k - 1));
-        Gamma = arma::join_rows(Gamma.cols(active), rnorm_vec(qB, 0, sqrt(sd_gammaB)));
+        Gamma = arma::join_rows(
+          Gamma.cols(active),
+          mvrnormArma(1, arma::zeros<arma::vec>(qB), Sigma_gamma).t()
+        );
         w = join_elem(w.elem(active), 1 - sum(w.elem(active)));
         v = join_elem(v.elem(active), 1);
         d = join_elem(d.elem(active), k - 1);
@@ -1020,7 +1023,10 @@ Rcpp::List Rcpp_gibbs(double alpha, double a_sigma, double b_sigma, double a_the
           }
         rho = join_elem(rho, 1);
         Lambda = arma::join_rows(Lambda, Lambda_star.col(k - 1) % Delta.col(k - 1));
-        Gamma = arma::join_rows(Gamma, rnorm_vec(qB, 0, sqrt(sd_gammaB)));
+        Gamma = arma::join_rows(
+          Gamma,
+          mvrnormArma(1, arma::zeros<arma::vec>(qB), Sigma_gamma).t()
+        );
         v(k - 2) = R::rbeta(1, alpha);
         v = join_elem(v, 1);
         w = v % join_elem(1, arma::cumprod(1 - v.head(k - 1)));
